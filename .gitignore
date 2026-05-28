@@ -1,0 +1,66 @@
+# Build outputs
+build/
+cmake-build-*/
+out/
+dist/
+*.o
+*.so
+*.a
+*.bin
+*.elf
+*.log
+
+# Ascend / CANN generated artifacts
+custom_opp_install/
+ascendc_kernels*/
+*.om
+*.air
+*.json.tmp
+kernel_meta/
+
+# Model weights and downloaded assets
+models/*
+!models/.gitkeep
+!models/minimind/
+!models/minimind/.gitkeep
+!models/minimind-v/
+!models/minimind-v/.gitkeep
+!models/minimind-o/
+!models/minimind-o/.gitkeep
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.gguf
+*.npz
+*.npy
+
+# Datasets and runtime media
+assets/**
+!assets/.gitkeep
+datasets/
+dataset/
+outputs/
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Local environment
+.env
+.env.*
+!.env.example
