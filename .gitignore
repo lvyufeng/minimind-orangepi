@@ -22,10 +22,13 @@ kernel_meta/
 models/*
 !models/.gitkeep
 !models/minimind/
+models/minimind/*
 !models/minimind/.gitkeep
 !models/minimind-v/
+models/minimind-v/*
 !models/minimind-v/.gitkeep
 !models/minimind-o/
+models/minimind-o/*
 !models/minimind-o/.gitkeep
 *.pth
 *.pt
