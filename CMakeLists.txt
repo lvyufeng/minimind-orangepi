@@ -54,6 +54,10 @@ add_library(minimind_orangepi_runtime STATIC
   src/csrc/lib/acl_context.cpp
   src/csrc/lib/ops.cpp
   src/csrc/lib/tensor.cpp
+  src/csrc/lib/tokenizer.cpp
+  src/csrc/lib/weights.cpp
+  src/csrc/models/minimind/config.cpp
+  src/csrc/models/minimind/rope.cpp
 )
 
 target_include_directories(minimind_orangepi_runtime
@@ -86,3 +90,7 @@ endfunction()
 enable_testing()
 minimind_add_unit_test(test_smoke tests/unit/test_smoke.cpp)
 minimind_add_unit_test(test_tensor tests/unit/test_tensor.cpp)
+minimind_add_unit_test(test_minimind_config tests/unit/test_minimind_config.cpp)
+minimind_add_unit_test(test_rope tests/unit/test_rope.cpp)
+minimind_add_unit_test(test_weights tests/unit/test_weights.cpp)
+minimind_add_unit_test(test_tokenizer tests/unit/test_tokenizer.cpp)
