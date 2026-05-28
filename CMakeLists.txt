@@ -57,6 +57,8 @@ add_library(minimind_orangepi_runtime STATIC
   src/csrc/lib/tokenizer.cpp
   src/csrc/lib/weights.cpp
   src/csrc/models/minimind/config.cpp
+  src/csrc/models/minimind/decoder_layer.cpp
+  src/csrc/models/minimind/language_model.cpp
   src/csrc/models/minimind/rope.cpp
 )
 
@@ -80,6 +82,10 @@ else()
   message(STATUS "Ascend ACL not found; building host-only runtime tests")
 endif()
 
+add_executable(minimind_generate src/csrc/tools/minimind_generate.cpp)
+target_link_libraries(minimind_generate PRIVATE minimind_orangepi_runtime)
+target_compile_options(minimind_generate PRIVATE -Wall -Wextra -Wpedantic)
+
 function(minimind_add_unit_test target source)
   add_executable(${target} ${source})
   target_link_libraries(${target} PRIVATE minimind_orangepi_runtime)
@@ -94,3 +100,5 @@ minimind_add_unit_test(test_minimind_config tests/unit/test_minimind_config.cpp)
 minimind_add_unit_test(test_rope tests/unit/test_rope.cpp)
 minimind_add_unit_test(test_weights tests/unit/test_weights.cpp)
 minimind_add_unit_test(test_tokenizer tests/unit/test_tokenizer.cpp)
+minimind_add_unit_test(test_decoder_layer tests/unit/test_decoder_layer.cpp)
+minimind_add_unit_test(test_language_model tests/unit/test_language_model.cpp)

@@ -1,0 +1,37 @@
+#pragma once
+
+#include "config.h"
+
+#include <cstdint>
+#include <vector>
+
+namespace minimind::model {
+
+struct DenseLayerWeights {
+  std::vector<float> input_norm;
+  std::vector<float> post_attention_norm;
+  std::vector<float> q_norm;
+  std::vector<float> k_norm;
+  std::vector<float> q_proj;
+  std::vector<float> k_proj;
+  std::vector<float> v_proj;
+  std::vector<float> o_proj;
+  std::vector<float> gate_proj;
+  std::vector<float> up_proj;
+  std::vector<float> down_proj;
+};
+
+struct LayerKvCache {
+  std::vector<float> keys;
+  std::vector<float> values;
+  int64_t tokens = 0;
+};
+
+std::vector<float> run_dense_decoder_layer(
+    const MiniMindConfig& config,
+    const DenseLayerWeights& weights,
+    LayerKvCache& cache,
+    const std::vector<float>& hidden,
+    int64_t position);
+
+}  // namespace minimind::model
