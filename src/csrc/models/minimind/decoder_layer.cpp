@@ -1,4 +1,5 @@
 #include "decoder_layer.h"
+#include "ascend_matmul.h"
 
 #include <algorithm>
 #include <cmath>
@@ -31,12 +32,10 @@ std::vector<float> rms_norm(const std::vector<float>& input,
   return output;
 }
 
-std::vector<float> matvec(const std::vector<float>& matrix,
-                          int64_t rows,
-                          int64_t cols,
-                          const std::vector<float>& input) {
-  require_size(matrix, rows * cols, "matrix");
-  require_size(input, cols, "matvec input");
+std::vector<float> cpu_matvec(const std::vector<float>& matrix,
+                              int64_t rows,
+                              int64_t cols,
+                              const std::vector<float>& input) {
   std::vector<float> output(static_cast<std::size_t>(rows), 0.0F);
   for (int64_t row = 0; row < rows; ++row) {
     float sum = 0.0F;
@@ -46,6 +45,18 @@ std::vector<float> matvec(const std::vector<float>& matrix,
     output[static_cast<std::size_t>(row)] = sum;
   }
   return output;
+}
+
+std::vector<float> matvec(const std::vector<float>& matrix,
+                          int64_t rows,
+                          int64_t cols,
+                          const std::vector<float>& input) {
+  require_size(matrix, rows * cols, "matrix");
+  require_size(input, cols, "matvec input");
+  if (cube_matvec_available() && rows >= 128 && cols >= 128) {
+    return cube_matvec(matrix, rows, cols, input);
+  }
+  return cpu_matvec(matrix, rows, cols, input);
 }
 
 void apply_rope(std::vector<float>& values, int64_t heads, int64_t head_dim, int64_t position, float theta) {

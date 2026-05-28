@@ -13,42 +13,54 @@ endif()
 option(MINIMIND_ENABLE_ASCEND "Build with Ascend ACL support when the toolkit is available" ON)
 
 set(MINIMIND_ASCEND_TOOLKIT_ROOT "" CACHE PATH "Ascend CANN toolkit root")
-if(NOT MINIMIND_ASCEND_TOOLKIT_ROOT AND DEFINED ENV{ASCEND_TOOLKIT_ROOT})
-  set(MINIMIND_ASCEND_TOOLKIT_ROOT "$ENV{ASCEND_TOOLKIT_ROOT}")
-endif()
-if(NOT MINIMIND_ASCEND_TOOLKIT_ROOT AND DEFINED ENV{ASCEND_HOME_PATH})
-  set(MINIMIND_ASCEND_TOOLKIT_ROOT "$ENV{ASCEND_HOME_PATH}")
-endif()
-if(NOT MINIMIND_ASCEND_TOOLKIT_ROOT)
-  if(EXISTS "/usr/local/Ascend/cann/latest")
-    set(MINIMIND_ASCEND_TOOLKIT_ROOT "/usr/local/Ascend/cann/latest")
-  elseif(EXISTS "/usr/local/Ascend/cann")
-    set(MINIMIND_ASCEND_TOOLKIT_ROOT "/usr/local/Ascend/cann")
-  elseif(EXISTS "/usr/local/Ascend/cann-8.5.0")
-    set(MINIMIND_ASCEND_TOOLKIT_ROOT "/usr/local/Ascend/cann-8.5.0")
+set(MINIMIND_ASCEND_TOOLKIT_CANDIDATES)
+foreach(candidate
+    "${MINIMIND_ASCEND_TOOLKIT_ROOT}"
+    "$ENV{ASCEND_TOOLKIT_ROOT}"
+    "$ENV{ASCEND_HOME_PATH}"
+    "/usr/local/Ascend/cann/latest"
+    "/usr/local/Ascend/cann"
+    "/usr/local/Ascend/cann-8.5.0")
+  if(candidate AND EXISTS "${candidate}")
+    list(APPEND MINIMIND_ASCEND_TOOLKIT_CANDIDATES "${candidate}")
   endif()
-endif()
+endforeach()
 
 set(MINIMIND_ASCEND_FOUND OFF)
-if(MINIMIND_ENABLE_ASCEND AND MINIMIND_ASCEND_TOOLKIT_ROOT)
+foreach(candidate IN LISTS MINIMIND_ASCEND_TOOLKIT_CANDIDATES)
+  if(MINIMIND_ASCEND_FOUND)
+    break()
+  endif()
   find_path(ASCEND_ACL_INCLUDE_DIR acl/acl.h
     HINTS
-      "${MINIMIND_ASCEND_TOOLKIT_ROOT}/include"
-      "${MINIMIND_ASCEND_TOOLKIT_ROOT}/aarch64-linux/include"
-      "${MINIMIND_ASCEND_TOOLKIT_ROOT}/x86_64-linux/include"
+      "${candidate}/include"
+      "${candidate}/aarch64-linux/include"
+      "${candidate}/x86_64-linux/include"
     NO_DEFAULT_PATH)
-
   find_library(ASCEND_ACL_LIBRARY ascendcl
     HINTS
-      "${MINIMIND_ASCEND_TOOLKIT_ROOT}/lib64"
-      "${MINIMIND_ASCEND_TOOLKIT_ROOT}/aarch64-linux/lib64"
-      "${MINIMIND_ASCEND_TOOLKIT_ROOT}/x86_64-linux/lib64"
+      "${candidate}/lib64"
+      "${candidate}/aarch64-linux/lib64"
+      "${candidate}/x86_64-linux/lib64"
+    NO_DEFAULT_PATH)
+  find_library(ASCEND_OPAPI_LIBRARY opapi
+    HINTS
+      "${candidate}/lib64"
+      "${candidate}/aarch64-linux/lib64"
+      "${candidate}/x86_64-linux/lib64"
+    NO_DEFAULT_PATH)
+  find_library(ASCEND_NNOPBASE_LIBRARY nnopbase
+    HINTS
+      "${candidate}/lib64"
+      "${candidate}/aarch64-linux/lib64"
+      "${candidate}/x86_64-linux/lib64"
     NO_DEFAULT_PATH)
 
-  if(ASCEND_ACL_INCLUDE_DIR AND ASCEND_ACL_LIBRARY)
+  if(MINIMIND_ENABLE_ASCEND AND ASCEND_ACL_INCLUDE_DIR AND ASCEND_ACL_LIBRARY AND ASCEND_OPAPI_LIBRARY AND ASCEND_NNOPBASE_LIBRARY)
+    set(MINIMIND_ASCEND_TOOLKIT_ROOT "${candidate}" CACHE PATH "Ascend CANN toolkit root" FORCE)
     set(MINIMIND_ASCEND_FOUND ON)
   endif()
-endif()
+endforeach()
 
 add_library(minimind_orangepi_runtime STATIC
   src/csrc/lib/acl_context.cpp
@@ -56,6 +68,7 @@ add_library(minimind_orangepi_runtime STATIC
   src/csrc/lib/tensor.cpp
   src/csrc/lib/tokenizer.cpp
   src/csrc/lib/weights.cpp
+  src/csrc/models/minimind/ascend_matmul.cpp
   src/csrc/models/minimind/config.cpp
   src/csrc/models/minimind/decoder_layer.cpp
   src/csrc/models/minimind/language_model.cpp
@@ -84,8 +97,12 @@ target_compile_definitions(minimind_orangepi_runtime
 
 if(MINIMIND_ASCEND_FOUND)
   target_include_directories(minimind_orangepi_runtime PRIVATE ${ASCEND_ACL_INCLUDE_DIR})
-  target_link_libraries(minimind_orangepi_runtime PUBLIC ${ASCEND_ACL_LIBRARY})
+  get_filename_component(ASCEND_ACL_LIBRARY_DIR "${ASCEND_ACL_LIBRARY}" DIRECTORY)
+  get_filename_component(ASCEND_OPAPI_LIBRARY_DIR "${ASCEND_OPAPI_LIBRARY}" DIRECTORY)
+  target_link_libraries(minimind_orangepi_runtime PUBLIC ${ASCEND_ACL_LIBRARY} ${ASCEND_OPAPI_LIBRARY} ${ASCEND_NNOPBASE_LIBRARY})
+  set(CMAKE_BUILD_RPATH "${ASCEND_ACL_LIBRARY_DIR};${ASCEND_OPAPI_LIBRARY_DIR}")
   message(STATUS "Ascend ACL found: ${ASCEND_ACL_LIBRARY}")
+  message(STATUS "Ascend opapi found: ${ASCEND_OPAPI_LIBRARY}")
 else()
   message(STATUS "Ascend ACL not found; building host-only runtime tests")
 endif()
