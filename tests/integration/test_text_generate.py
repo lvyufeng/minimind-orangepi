@@ -20,3 +20,21 @@ def test_run_text_cli() -> None:
         text=True,
     )
     assert "generated_tokens:" in result.stdout
+
+
+def test_minimind_generate_accepts_explicit_tokens() -> None:
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            str(root / "build" / "minimind_generate"),
+            "--tokens",
+            "1,2",
+            "--max-new-tokens",
+            "2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "prompt_tokens: 1 2" in result.stdout
+    assert "generated_tokens:" in result.stdout

@@ -4,6 +4,8 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -26,15 +28,37 @@ int64_t int_arg_value(int argc, char** argv, const std::string& name, int64_t fa
   return std::strtoll(value.c_str(), nullptr, 10);
 }
 
+std::vector<int32_t> parse_token_ids(const std::string& value) {
+  std::vector<int32_t> tokens;
+  std::stringstream stream(value);
+  std::string item;
+  while (std::getline(stream, item, ',')) {
+    if (item.empty()) {
+      continue;
+    }
+    tokens.push_back(static_cast<int32_t>(std::strtol(item.c_str(), nullptr, 10)));
+  }
+  return tokens;
+}
+
 std::vector<int32_t> prompt_tokens_for_model(const std::string& prompt,
+                                             const std::string& explicit_tokens,
                                              const minimind::model::LanguageModel& model) {
-  minimind::ByteTokenizer tokenizer;
-  auto tokens = tokenizer.encode(prompt);
-  for (auto& token : tokens) {
-    token = token % static_cast<int32_t>(model.config().vocab_size);
+  auto tokens = explicit_tokens.empty() ? std::vector<int32_t>{} : parse_token_ids(explicit_tokens);
+  if (tokens.empty()) {
+    minimind::ByteTokenizer tokenizer;
+    tokens = tokenizer.encode(prompt);
+    for (auto& token : tokens) {
+      token = token % static_cast<int32_t>(model.config().vocab_size);
+    }
   }
   if (tokens.empty()) {
     tokens.push_back(model.config().bos_token_id);
+  }
+  for (int32_t token : tokens) {
+    if (token < 0 || token >= model.config().vocab_size) {
+      throw std::out_of_range("input token id is out of vocabulary range");
+    }
   }
   return tokens;
 }
@@ -43,13 +67,14 @@ std::vector<int32_t> prompt_tokens_for_model(const std::string& prompt,
 
 int main(int argc, char** argv) {
   const std::string prompt = arg_value(argc, argv, "--prompt", "MiniMind");
+  const std::string explicit_tokens = arg_value(argc, argv, "--tokens", "");
   const std::string model_dir = arg_value(argc, argv, "--model", "");
   const int64_t max_new_tokens = int_arg_value(argc, argv, "--max-new-tokens", 8);
 
   auto model = (!model_dir.empty() && minimind::model::has_runtime_language_model(model_dir))
                    ? minimind::model::load_runtime_language_model(model_dir)
                    : minimind::model::make_toy_language_model();
-  const auto prompt_tokens = prompt_tokens_for_model(prompt, model);
+  const auto prompt_tokens = prompt_tokens_for_model(prompt, explicit_tokens, model);
   const auto generated = model.generate(prompt_tokens, max_new_tokens);
 
   std::cout << "prompt_tokens:";
