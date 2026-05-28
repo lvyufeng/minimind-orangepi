@@ -94,6 +94,10 @@ add_executable(minimind_generate src/csrc/tools/minimind_generate.cpp)
 target_link_libraries(minimind_generate PRIVATE minimind_orangepi_runtime)
 target_compile_options(minimind_generate PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(bench_decode bench/bench_decode.cpp)
+target_link_libraries(bench_decode PRIVATE minimind_orangepi_runtime)
+target_compile_options(bench_decode PRIVATE -Wall -Wextra -Wpedantic)
+
 function(minimind_add_unit_test target source)
   add_executable(${target} ${source})
   target_link_libraries(${target} PRIVATE minimind_orangepi_runtime)
