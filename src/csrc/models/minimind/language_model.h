@@ -35,6 +35,7 @@ class LanguageModel {
 };
 
 LanguageModel make_toy_language_model();
+LanguageModel make_toy_moe_language_model();
 int32_t argmax_token(const std::vector<float>& logits);
 
 }  // namespace minimind::model

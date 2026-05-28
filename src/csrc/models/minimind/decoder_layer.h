@@ -7,6 +7,12 @@
 
 namespace minimind::model {
 
+struct ExpertWeights {
+  std::vector<float> gate_proj;
+  std::vector<float> up_proj;
+  std::vector<float> down_proj;
+};
+
 struct DenseLayerWeights {
   std::vector<float> input_norm;
   std::vector<float> post_attention_norm;
@@ -19,6 +25,8 @@ struct DenseLayerWeights {
   std::vector<float> gate_proj;
   std::vector<float> up_proj;
   std::vector<float> down_proj;
+  std::vector<float> moe_gate;
+  std::vector<ExpertWeights> experts;
 };
 
 struct LayerKvCache {

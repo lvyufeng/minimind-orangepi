@@ -162,13 +162,32 @@ std::vector<float> run_dense_decoder_layer(
   }
 
   auto post_normed = rms_norm(residual, weights.post_attention_norm, config.rms_norm_eps);
-  auto gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
-  auto up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
-  std::vector<float> activated(gate.size());
-  for (std::size_t i = 0; i < gate.size(); ++i) {
-    activated[i] = silu(gate[i]) * up[i];
+  std::vector<float> mlp;
+  if (config.use_moe) {
+    require_size(weights.moe_gate, config.num_experts * config.hidden_size, "moe_gate");
+    if (static_cast<int64_t>(weights.experts.size()) != config.num_experts) {
+      throw std::invalid_argument("expert count does not match config");
+    }
+    const auto router = matvec(weights.moe_gate, config.num_experts, config.hidden_size, post_normed);
+    const int64_t expert_index = static_cast<int64_t>(
+        std::distance(router.begin(), std::max_element(router.begin(), router.end())));
+    const auto& expert = weights.experts[static_cast<std::size_t>(expert_index)];
+    auto gate = matvec(expert.gate_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+    auto up = matvec(expert.up_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+    std::vector<float> activated(gate.size());
+    for (std::size_t i = 0; i < gate.size(); ++i) {
+      activated[i] = silu(gate[i]) * up[i];
+    }
+    mlp = matvec(expert.down_proj, config.hidden_size, config.moe_intermediate_size, activated);
+  } else {
+    auto gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
+    auto up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
+    std::vector<float> activated(gate.size());
+    for (std::size_t i = 0; i < gate.size(); ++i) {
+      activated[i] = silu(gate[i]) * up[i];
+    }
+    mlp = matvec(weights.down_proj, config.hidden_size, config.intermediate_size, activated);
   }
-  auto mlp = matvec(weights.down_proj, config.hidden_size, config.intermediate_size, activated);
 
   for (std::size_t i = 0; i < residual.size(); ++i) {
     residual[i] += mlp[i];

@@ -81,9 +81,6 @@ LanguageModel::LanguageModel(MiniMindConfig config, DenseModelWeights weights)
   if (!errors.empty()) {
     throw std::invalid_argument("invalid MiniMind config: " + errors.front());
   }
-  if (config_.use_moe) {
-    throw std::invalid_argument("LanguageModel dense baseline does not support MoE yet");
-  }
   require_size(weights_.embed_tokens, config_.vocab_size * config_.hidden_size, "embed_tokens");
   require_size(weights_.final_norm, config_.hidden_size, "final_norm");
   require_size(weights_.lm_head, config_.vocab_size * config_.hidden_size, "lm_head");
@@ -198,6 +195,73 @@ LanguageModel make_toy_language_model() {
   layer.gate_proj = identity_matrix(config.intermediate_size, config.hidden_size);
   layer.up_proj = identity_matrix(config.intermediate_size, config.hidden_size);
   layer.down_proj = identity_matrix(config.hidden_size, config.intermediate_size);
+  weights.layers.push_back(std::move(layer));
+
+  return LanguageModel(config, std::move(weights));
+}
+
+LanguageModel make_toy_moe_language_model() {
+  MiniMindConfig config;
+  config.hidden_size = 4;
+  config.num_hidden_layers = 1;
+  config.use_moe = true;
+  config.vocab_size = 8;
+  config.bos_token_id = 1;
+  config.eos_token_id = 2;
+  config.num_attention_heads = 2;
+  config.num_key_value_heads = 1;
+  config.head_dim = 2;
+  config.intermediate_size = 8;
+  config.max_position_embeddings = 16;
+  config.rope_theta = 10000.0F;
+  config.tie_word_embeddings = false;
+  config.num_experts = 2;
+  config.num_experts_per_tok = 1;
+  config.moe_intermediate_size = 8;
+
+  DenseModelWeights weights;
+  weights.embed_tokens = {
+      0.0F, 0.0F, 0.0F, 0.0F,
+      1.0F, 0.0F, 0.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 0.0F,
+      0.0F, 0.0F, 1.0F, 0.0F,
+      0.0F, 0.0F, 0.0F, 1.0F,
+      1.0F, 1.0F, 0.0F, 0.0F,
+      0.0F, 1.0F, 1.0F, 0.0F,
+      0.0F, 0.0F, 1.0F, 1.0F,
+  };
+  weights.final_norm = filled(config.hidden_size, 1.0F);
+  weights.lm_head = {
+      0.0F, 0.0F, 0.0F, 0.0F,
+      0.2F, 0.0F, 0.0F, 0.0F,
+      0.0F, 0.2F, 0.0F, 0.0F,
+      0.0F, 0.0F, 0.2F, 0.0F,
+      0.0F, 0.0F, 0.0F, 0.2F,
+      2.0F, 0.1F, 0.0F, 0.0F,
+      0.0F, 2.0F, 0.1F, 0.0F,
+      0.0F, 0.0F, 2.0F, 0.1F,
+  };
+
+  DenseLayerWeights layer;
+  layer.input_norm = filled(config.hidden_size, 1.0F);
+  layer.post_attention_norm = filled(config.hidden_size, 1.0F);
+  layer.q_norm = filled(config.head_dim, 1.0F);
+  layer.k_norm = filled(config.head_dim, 1.0F);
+  layer.q_proj = identity_matrix(config.num_attention_heads * config.head_dim, config.hidden_size);
+  layer.k_proj = identity_matrix(config.num_key_value_heads * config.head_dim, config.hidden_size);
+  layer.v_proj = identity_matrix(config.num_key_value_heads * config.head_dim, config.hidden_size);
+  layer.o_proj = identity_matrix(config.hidden_size, config.num_attention_heads * config.head_dim);
+  layer.moe_gate = {
+      1.0F, 0.0F, 0.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 0.0F,
+  };
+  for (int expert = 0; expert < config.num_experts; ++expert) {
+    ExpertWeights expert_weights;
+    expert_weights.gate_proj = identity_matrix(config.moe_intermediate_size, config.hidden_size);
+    expert_weights.up_proj = identity_matrix(config.moe_intermediate_size, config.hidden_size);
+    expert_weights.down_proj = identity_matrix(config.hidden_size, config.moe_intermediate_size);
+    layer.experts.push_back(std::move(expert_weights));
+  }
   weights.layers.push_back(std::move(layer));
 
   return LanguageModel(config, std::move(weights));
