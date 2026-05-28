@@ -140,9 +140,19 @@ std::vector<float> run_dense_decoder_layer(
   const int64_t kv_size = config.num_key_value_heads * config.head_dim;
 
   auto normed = rms_norm(hidden, weights.input_norm, config.rms_norm_eps);
-  auto query = matvec(weights.q_proj, q_size, config.hidden_size, normed);
-  auto key = matvec(weights.k_proj, kv_size, config.hidden_size, normed);
-  auto value = matvec(weights.v_proj, kv_size, config.hidden_size, normed);
+  std::vector<float> query;
+  std::vector<float> key;
+  std::vector<float> value;
+  if (!weights.qkv_proj.empty()) {
+    const auto qkv = matvec(weights.qkv_proj, q_size + 2 * kv_size, config.hidden_size, normed);
+    query.assign(qkv.begin(), qkv.begin() + q_size);
+    key.assign(qkv.begin() + q_size, qkv.begin() + q_size + kv_size);
+    value.assign(qkv.begin() + q_size + kv_size, qkv.end());
+  } else {
+    query = matvec(weights.q_proj, q_size, config.hidden_size, normed);
+    key = matvec(weights.k_proj, kv_size, config.hidden_size, normed);
+    value = matvec(weights.v_proj, kv_size, config.hidden_size, normed);
+  }
 
   for (int64_t head = 0; head < config.num_attention_heads; ++head) {
     std::vector<float> slice(query.begin() + head * config.head_dim,
@@ -183,16 +193,32 @@ std::vector<float> run_dense_decoder_layer(
     const int64_t expert_index = static_cast<int64_t>(
         std::distance(router.begin(), std::max_element(router.begin(), router.end())));
     const auto& expert = weights.experts[static_cast<std::size_t>(expert_index)];
-    auto gate = matvec(expert.gate_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
-    auto up = matvec(expert.up_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+    std::vector<float> gate;
+    std::vector<float> up;
+    if (!expert.gate_up_proj.empty()) {
+      const auto gate_up = matvec(expert.gate_up_proj, 2 * config.moe_intermediate_size, config.hidden_size, post_normed);
+      gate.assign(gate_up.begin(), gate_up.begin() + config.moe_intermediate_size);
+      up.assign(gate_up.begin() + config.moe_intermediate_size, gate_up.end());
+    } else {
+      gate = matvec(expert.gate_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+      up = matvec(expert.up_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+    }
     std::vector<float> activated(gate.size());
     for (std::size_t i = 0; i < gate.size(); ++i) {
       activated[i] = silu(gate[i]) * up[i];
     }
     mlp = matvec(expert.down_proj, config.hidden_size, config.moe_intermediate_size, activated);
   } else {
-    auto gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
-    auto up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
+    std::vector<float> gate;
+    std::vector<float> up;
+    if (!weights.gate_up_proj.empty()) {
+      const auto gate_up = matvec(weights.gate_up_proj, 2 * config.intermediate_size, config.hidden_size, post_normed);
+      gate.assign(gate_up.begin(), gate_up.begin() + config.intermediate_size);
+      up.assign(gate_up.begin() + config.intermediate_size, gate_up.end());
+    } else {
+      gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
+      up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
+    }
     std::vector<float> activated(gate.size());
     for (std::size_t i = 0; i < gate.size(); ++i) {
       activated[i] = silu(gate[i]) * up[i];

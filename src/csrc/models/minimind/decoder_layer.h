@@ -11,6 +11,7 @@ struct ExpertWeights {
   std::vector<float> gate_proj;
   std::vector<float> up_proj;
   std::vector<float> down_proj;
+  std::vector<float> gate_up_proj;
 };
 
 struct DenseLayerWeights {
@@ -21,9 +22,11 @@ struct DenseLayerWeights {
   std::vector<float> q_proj;
   std::vector<float> k_proj;
   std::vector<float> v_proj;
+  std::vector<float> qkv_proj;
   std::vector<float> o_proj;
   std::vector<float> gate_proj;
   std::vector<float> up_proj;
+  std::vector<float> gate_up_proj;
   std::vector<float> down_proj;
   std::vector<float> moe_gate;
   std::vector<ExpertWeights> experts;

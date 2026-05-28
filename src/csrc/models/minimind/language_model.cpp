@@ -84,6 +84,36 @@ std::vector<float> filled(int64_t size, float value) {
   return std::vector<float>(static_cast<std::size_t>(size), value);
 }
 
+void append_matrix(std::vector<float>& output, const std::vector<float>& matrix) {
+  output.insert(output.end(), matrix.begin(), matrix.end());
+}
+
+void initialize_fused_layer_weights(const MiniMindConfig& config, DenseLayerWeights& layer) {
+  const int64_t hidden_size = config.hidden_size;
+  const int64_t q_size = config.num_attention_heads * config.head_dim;
+  const int64_t kv_size = config.num_key_value_heads * config.head_dim;
+  if (layer.qkv_proj.empty() && !layer.q_proj.empty() && !layer.k_proj.empty() && !layer.v_proj.empty()) {
+    layer.qkv_proj.reserve(static_cast<std::size_t>((q_size + 2 * kv_size) * hidden_size));
+    append_matrix(layer.qkv_proj, layer.q_proj);
+    append_matrix(layer.qkv_proj, layer.k_proj);
+    append_matrix(layer.qkv_proj, layer.v_proj);
+  }
+  if (!config.use_moe && layer.gate_up_proj.empty() && !layer.gate_proj.empty() && !layer.up_proj.empty()) {
+    layer.gate_up_proj.reserve(static_cast<std::size_t>(2 * config.intermediate_size * hidden_size));
+    append_matrix(layer.gate_up_proj, layer.gate_proj);
+    append_matrix(layer.gate_up_proj, layer.up_proj);
+  }
+  if (config.use_moe) {
+    for (auto& expert : layer.experts) {
+      if (expert.gate_up_proj.empty() && !expert.gate_proj.empty() && !expert.up_proj.empty()) {
+        expert.gate_up_proj.reserve(static_cast<std::size_t>(2 * config.moe_intermediate_size * hidden_size));
+        append_matrix(expert.gate_up_proj, expert.gate_proj);
+        append_matrix(expert.gate_up_proj, expert.up_proj);
+      }
+    }
+  }
+}
+
 }  // namespace
 
 LanguageModel::LanguageModel(MiniMindConfig config, DenseModelWeights weights)
@@ -97,6 +127,9 @@ LanguageModel::LanguageModel(MiniMindConfig config, DenseModelWeights weights)
   require_size(weights_.lm_head, config_.vocab_size * config_.hidden_size, "lm_head");
   if (static_cast<int64_t>(weights_.layers.size()) != config_.num_hidden_layers) {
     throw std::invalid_argument("layer weight count does not match config");
+  }
+  for (auto& layer : weights_.layers) {
+    initialize_fused_layer_weights(config_, layer);
   }
 }
 
