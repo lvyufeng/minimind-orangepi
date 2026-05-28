@@ -81,6 +81,8 @@ MiniMindConfig config_from_file(const std::filesystem::path& path) {
   config.intermediate_size = get_i64(values, "intermediate_size", config.intermediate_size);
   config.max_position_embeddings = get_i64(values, "max_position_embeddings", config.max_position_embeddings);
   config.tie_word_embeddings = get_bool(values, "tie_word_embeddings", config.tie_word_embeddings);
+  config.num_experts = get_i64(values, "num_experts", config.num_experts);
+  config.num_experts_per_tok = get_i64(values, "num_experts_per_tok", config.num_experts_per_tok);
   config.moe_intermediate_size = get_i64(values, "moe_intermediate_size", config.intermediate_size);
   return config;
 }
@@ -143,9 +145,22 @@ DenseModelWeights read_weights(const MiniMindConfig& config, const std::filesyst
     layer_weights.k_proj = read_tensor(input, prefix + "self_attn.k_proj.weight");
     layer_weights.v_proj = read_tensor(input, prefix + "self_attn.v_proj.weight");
     layer_weights.o_proj = read_tensor(input, prefix + "self_attn.o_proj.weight");
-    layer_weights.gate_proj = read_tensor(input, prefix + "mlp.gate_proj.weight");
-    layer_weights.up_proj = read_tensor(input, prefix + "mlp.up_proj.weight");
-    layer_weights.down_proj = read_tensor(input, prefix + "mlp.down_proj.weight");
+    if (config.use_moe) {
+      layer_weights.moe_gate = read_tensor(input, prefix + "mlp.gate.weight");
+      layer_weights.experts.reserve(static_cast<std::size_t>(config.num_experts));
+      for (int64_t expert = 0; expert < config.num_experts; ++expert) {
+        const std::string expert_prefix = prefix + "mlp.experts." + std::to_string(expert) + ".";
+        ExpertWeights expert_weights;
+        expert_weights.gate_proj = read_tensor(input, expert_prefix + "gate_proj.weight");
+        expert_weights.up_proj = read_tensor(input, expert_prefix + "up_proj.weight");
+        expert_weights.down_proj = read_tensor(input, expert_prefix + "down_proj.weight");
+        layer_weights.experts.push_back(std::move(expert_weights));
+      }
+    } else {
+      layer_weights.gate_proj = read_tensor(input, prefix + "mlp.gate_proj.weight");
+      layer_weights.up_proj = read_tensor(input, prefix + "mlp.up_proj.weight");
+      layer_weights.down_proj = read_tensor(input, prefix + "mlp.down_proj.weight");
+    }
     weights.layers.push_back(std::move(layer_weights));
   }
   return weights;

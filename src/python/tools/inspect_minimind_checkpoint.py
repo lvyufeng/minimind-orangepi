@@ -44,7 +44,10 @@ def load_config(model_dir: Path) -> MiniMindConfig:
     hidden_size = int(data.get("hidden_size", 768))
     num_attention_heads = int(data.get("num_attention_heads", 8))
     intermediate_size = int(data.get("intermediate_size", default_intermediate_size(hidden_size)))
-    use_moe = bool(data.get("use_moe", data.get("num_experts", 0) not in (0, None)))
+    if "use_moe" in data:
+        use_moe = bool(data["use_moe"])
+    else:
+        use_moe = "moe_intermediate_size" in data or "num_experts_per_tok" in data
 
     return MiniMindConfig(
         hidden_size=hidden_size,

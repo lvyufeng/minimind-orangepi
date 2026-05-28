@@ -115,21 +115,36 @@ def tensor_order(config: MiniMindConfig) -> list[str]:
     names = list(TENSOR_ORDER_PREFIX)
     for layer in range(config.num_hidden_layers):
         prefix = f"model.layers.{layer}."
-        names.extend(
-            [
-                prefix + "input_layernorm.weight",
-                prefix + "post_attention_layernorm.weight",
-                prefix + "self_attn.q_norm.weight",
-                prefix + "self_attn.k_norm.weight",
-                prefix + "self_attn.q_proj.weight",
-                prefix + "self_attn.k_proj.weight",
-                prefix + "self_attn.v_proj.weight",
-                prefix + "self_attn.o_proj.weight",
-                prefix + "mlp.gate_proj.weight",
-                prefix + "mlp.up_proj.weight",
-                prefix + "mlp.down_proj.weight",
-            ]
-        )
+        layer_names = [
+            prefix + "input_layernorm.weight",
+            prefix + "post_attention_layernorm.weight",
+            prefix + "self_attn.q_norm.weight",
+            prefix + "self_attn.k_norm.weight",
+            prefix + "self_attn.q_proj.weight",
+            prefix + "self_attn.k_proj.weight",
+            prefix + "self_attn.v_proj.weight",
+            prefix + "self_attn.o_proj.weight",
+        ]
+        if config.use_moe:
+            layer_names.append(prefix + "mlp.gate.weight")
+            for expert in range(config.num_experts):
+                expert_prefix = prefix + f"mlp.experts.{expert}."
+                layer_names.extend(
+                    [
+                        expert_prefix + "gate_proj.weight",
+                        expert_prefix + "up_proj.weight",
+                        expert_prefix + "down_proj.weight",
+                    ]
+                )
+        else:
+            layer_names.extend(
+                [
+                    prefix + "mlp.gate_proj.weight",
+                    prefix + "mlp.up_proj.weight",
+                    prefix + "mlp.down_proj.weight",
+                ]
+            )
+        names.extend(layer_names)
     return names
 
 
@@ -169,6 +184,8 @@ def write_runtime_config(config: MiniMindConfig, output_dir: Path) -> None:
         f"intermediate_size={config.intermediate_size}",
         f"max_position_embeddings={config.max_position_embeddings}",
         f"tie_word_embeddings={int(config.tie_word_embeddings)}",
+        f"num_experts={config.num_experts}",
+        f"num_experts_per_tok={config.num_experts_per_tok}",
         f"moe_intermediate_size={config.moe_intermediate_size}",
     ]
     (output_dir / "minimind_runtime_config.txt").write_text("\n".join(lines) + "\n")
@@ -179,8 +196,8 @@ def export_weights(model_dir: Path, output_dir: Path) -> None:
     config_errors = validate_config(config)
     if config_errors:
         raise RuntimeError("invalid config: " + config_errors[0])
-    if config.use_moe:
-        raise RuntimeError("runtime export currently supports dense MiniMind checkpoints only")
+    if config.use_moe and config.num_experts_per_tok != 1:
+        raise RuntimeError("runtime export currently supports top-1 MoE checkpoints only")
 
     state = load_state_dict(model_dir)
     expected = expected_shapes(config)
