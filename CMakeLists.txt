@@ -63,6 +63,7 @@ add_library(minimind_orangepi_runtime STATIC
   src/csrc/models/minimind_v/config.cpp
   src/csrc/models/minimind_v/projector.cpp
   src/csrc/models/minimind_v/vision_encoder.cpp
+  src/csrc/models/minimind_v/vlm_model.cpp
 )
 
 target_include_directories(minimind_orangepi_runtime
@@ -107,3 +108,4 @@ minimind_add_unit_test(test_decoder_layer tests/unit/test_decoder_layer.cpp)
 minimind_add_unit_test(test_language_model tests/unit/test_language_model.cpp)
 minimind_add_unit_test(test_minimind_v_config tests/unit/test_minimind_v_config.cpp)
 minimind_add_unit_test(test_projector tests/unit/test_projector.cpp)
+minimind_add_unit_test(test_vlm_model tests/unit/test_vlm_model.cpp)
