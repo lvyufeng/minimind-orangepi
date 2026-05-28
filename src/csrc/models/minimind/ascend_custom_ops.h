@@ -20,4 +20,12 @@ std::vector<float> custom_rope(const std::vector<float>& input,
                                int64_t position,
                                float theta);
 
+std::vector<float> custom_attention(const std::vector<float>& query,
+                                    const std::vector<float>& keys,
+                                    const std::vector<float>& values,
+                                    int64_t tokens,
+                                    int64_t q_heads,
+                                    int64_t kv_heads,
+                                    int64_t head_dim);
+
 }  // namespace minimind::model

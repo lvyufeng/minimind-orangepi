@@ -76,5 +76,52 @@ int main() {
     }
   }
 
+  const int64_t attn_tokens = 5;
+  const int64_t attn_q_heads = 4;
+  const int64_t attn_kv_heads = 2;
+  const int64_t attn_head_dim = 16;
+  std::vector<float> query(static_cast<std::size_t>(attn_q_heads * attn_head_dim));
+  std::vector<float> keys(static_cast<std::size_t>(attn_tokens * attn_kv_heads * attn_head_dim));
+  std::vector<float> values(keys.size());
+  for (std::size_t i = 0; i < query.size(); ++i) {
+    query[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.03125F;
+  }
+  for (std::size_t i = 0; i < keys.size(); ++i) {
+    keys[i] = static_cast<float>(static_cast<int>(i % 17) - 8) * 0.025F;
+    values[i] = static_cast<float>(static_cast<int>(i % 11) - 5) * 0.0375F;
+  }
+  const auto attended = minimind::model::custom_attention(query, keys, values, attn_tokens, attn_q_heads,
+                                                          attn_kv_heads, attn_head_dim);
+  CHECK(attended.size() == query.size());
+  const int64_t kv_repeat = attn_q_heads / attn_kv_heads;
+  for (int64_t q_head = 0; q_head < attn_q_heads; ++q_head) {
+    const int64_t kv_head = q_head / kv_repeat;
+    std::vector<float> scores(static_cast<std::size_t>(attn_tokens));
+    float max_score = -INFINITY;
+    for (int64_t token = 0; token < attn_tokens; ++token) {
+      float dot = 0.0F;
+      for (int64_t dim = 0; dim < attn_head_dim; ++dim) {
+        dot += query[static_cast<std::size_t>(q_head * attn_head_dim + dim)] *
+               keys[static_cast<std::size_t>((token * attn_kv_heads + kv_head) * attn_head_dim + dim)];
+      }
+      const float score = dot / std::sqrt(static_cast<float>(attn_head_dim));
+      scores[static_cast<std::size_t>(token)] = score;
+      max_score = std::max(max_score, score);
+    }
+    float denom = 0.0F;
+    for (float& score : scores) {
+      score = std::exp(score - max_score);
+      denom += score;
+    }
+    for (int64_t dim = 0; dim < attn_head_dim; ++dim) {
+      float expected = 0.0F;
+      for (int64_t token = 0; token < attn_tokens; ++token) {
+        const float weight_value = scores[static_cast<std::size_t>(token)] / denom;
+        expected += weight_value * values[static_cast<std::size_t>((token * attn_kv_heads + kv_head) * attn_head_dim + dim)];
+      }
+      CHECK(std::fabs(attended[static_cast<std::size_t>(q_head * attn_head_dim + dim)] - expected) < 5e-2F);
+    }
+  }
+
   return 0;
 }

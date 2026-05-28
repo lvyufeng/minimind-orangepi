@@ -11,6 +11,7 @@
 #if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
 #include <acl/acl.h>
 #include <aclnn/aclnn_base.h>
+#include <aclnn_mini_mind_attention.h>
 #include <aclnn_mini_mind_rms_norm.h>
 #include <aclnn_mini_mind_rope.h>
 #include <aclnn_mini_mind_swi_glu.h>
@@ -259,6 +260,61 @@ std::vector<float> custom_rope(const std::vector<float>& input,
   (void)position;
   (void)theta;
   throw std::runtime_error("custom_rope is unavailable");
+#endif
+}
+
+std::vector<float> custom_attention(const std::vector<float>& query,
+                                    const std::vector<float>& keys,
+                                    const std::vector<float>& values,
+                                    int64_t tokens,
+                                    int64_t q_heads,
+                                    int64_t kv_heads,
+                                    int64_t head_dim) {
+#if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
+  if (tokens <= 0 || q_heads <= 0 || kv_heads <= 0 || head_dim <= 0 || q_heads % kv_heads != 0) {
+    throw std::invalid_argument("custom_attention invalid shape");
+  }
+  if (head_dim > 128 || tokens > 2048 || q_heads > 255 || kv_heads > 255 ||
+      static_cast<int64_t>(query.size()) != q_heads * head_dim ||
+      static_cast<int64_t>(keys.size()) != tokens * kv_heads * head_dim ||
+      static_cast<int64_t>(values.size()) != tokens * kv_heads * head_dim) {
+    throw std::invalid_argument("custom_attention shape mismatch");
+  }
+  (void)runtime();
+
+  DeviceBuffer query_device = copy_half_to_device(query);
+  DeviceBuffer keys_device = copy_half_to_device(keys);
+  DeviceBuffer values_device = copy_half_to_device(values);
+  DeviceBuffer output_device(query.size() * sizeof(uint16_t));
+
+  const int64_t query_dims[2] = {q_heads, head_dim};
+  const int64_t query_strides[2] = {head_dim, 1};
+  const int64_t cache_dims[3] = {tokens, kv_heads, head_dim};
+  const int64_t cache_strides[3] = {kv_heads * head_dim, head_dim, 1};
+  TensorHandle query_tensor(query_dims, query_strides, 2, query_device.data());
+  TensorHandle keys_tensor(cache_dims, cache_strides, 3, keys_device.data());
+  TensorHandle values_tensor(cache_dims, cache_strides, 3, values_device.data());
+  TensorHandle out(query_dims, query_strides, 2, output_device.data());
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* executor = nullptr;
+  check_aclnn(aclnnMiniMindAttentionGetWorkspaceSize(query_tensor.get(), keys_tensor.get(), values_tensor.get(), out.get(),
+                                                     &workspace_size, &executor),
+              "aclnnMiniMindAttentionGetWorkspaceSize failed");
+  DeviceBuffer workspace(workspace_size);
+  check_aclnn(aclnnMiniMindAttention(workspace.data(), workspace_size, executor, runtime().stream()),
+              "aclnnMiniMindAttention failed");
+  check_acl(aclrtSynchronizeStream(runtime().stream()), "aclrtSynchronizeStream failed");
+  return copy_half_to_host(output_device, query.size());
+#else
+  (void)query;
+  (void)keys;
+  (void)values;
+  (void)tokens;
+  (void)q_heads;
+  (void)kv_heads;
+  (void)head_dim;
+  throw std::runtime_error("custom_attention is unavailable");
 #endif
 }
 

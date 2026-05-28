@@ -17,6 +17,11 @@ struct MiniMindRopeTiling {
   uint32_t metadata;
 };
 
+struct MiniMindAttentionTiling {
+  uint32_t tokens;
+  uint32_t metadata;
+};
+
 uint32_t infer_like_input0(gert::InferShapeContext* context) {
   const gert::Shape* input = context->GetInputShape(0);
   gert::Shape* output = context->GetOutputShape(0);
@@ -86,6 +91,37 @@ uint32_t tile_rope_op(gert::TilingContext* context) {
   return kSuccess;
 }
 
+uint32_t tile_attention_op(gert::TilingContext* context) {
+  const gert::StorageShape* query = context->GetInputShape(0);
+  const gert::StorageShape* keys = context->GetInputShape(1);
+  if (query == nullptr || keys == nullptr) {
+    return ge::GRAPH_FAILED;
+  }
+
+  const gert::Shape& query_shape = query->GetStorageShape();
+  const gert::Shape& key_shape = keys->GetStorageShape();
+  if (query_shape.GetDimNum() != 2 || key_shape.GetDimNum() != 3 || query_shape.GetDim(1) <= 0 ||
+      query_shape.GetDim(1) > 255 || key_shape.GetDim(0) <= 0 || key_shape.GetDim(0) > 2048 ||
+      key_shape.GetDim(1) <= 0 || query_shape.GetDim(1) != key_shape.GetDim(2)) {
+    return ge::GRAPH_FAILED;
+  }
+
+  MiniMindAttentionTiling* tiling = context->GetTilingData<MiniMindAttentionTiling>();
+  if (tiling == nullptr) {
+    return ge::GRAPH_FAILED;
+  }
+
+  tiling->tokens = static_cast<uint32_t>(key_shape.GetDim(0));
+  tiling->metadata = (static_cast<uint32_t>(query_shape.GetDim(0)) << 24U) |
+                     (static_cast<uint32_t>(key_shape.GetDim(1)) << 16U) |
+                     static_cast<uint32_t>(query_shape.GetDim(1));
+
+  if (context->SetBlockDim(1) != ge::GRAPH_SUCCESS || context->SetTilingKey(0) != ge::GRAPH_SUCCESS) {
+    return ge::GRAPH_FAILED;
+  }
+  return kSuccess;
+}
+
 class MiniMindRmsNorm : public ops::OpDef {
  public:
   explicit MiniMindRmsNorm(const char* name) : OpDef(name) {
@@ -124,8 +160,22 @@ class MiniMindRope : public ops::OpDef {
   }
 };
 
+class MiniMindAttention : public ops::OpDef {
+ public:
+  explicit MiniMindAttention(const char* name) : OpDef(name) {
+    Input("query").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    Input("keys").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    Input("values").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    Output("out").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    SetInferShape(infer_like_input0);
+    SetInferDataType(infer_dtype_like_input0);
+    AICore().SetTiling(tile_attention_op).AddConfig("ascend310b");
+  }
+};
+
 OP_ADD(MiniMindRmsNorm);
 OP_ADD(MiniMindSwiGlu);
 OP_ADD(MiniMindRope);
+OP_ADD(MiniMindAttention);
 
 }  // namespace
