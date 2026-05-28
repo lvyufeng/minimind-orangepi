@@ -16,11 +16,13 @@ def main() -> None:
     parser.add_argument("--model", type=Path, default=None, help="Runtime model directory exported by export_minimind_runtime.py")
     parser.add_argument("--prompt", default="MiniMind")
     parser.add_argument("--max-new-tokens", type=int, default=8)
+    parser.add_argument("--raw-prompt", action="store_true", help="Do not wrap the prompt in MiniMind chat markers")
+    parser.add_argument("--open-thinking", action="store_true", help="Start the assistant response with a <think> marker")
     parser.add_argument("--executable", type=Path, default=None)
     args = parser.parse_args()
 
     session = TextSession(args.executable, args.model)
-    print(session.generate(args.prompt, args.max_new_tokens), end="")
+    print(session.generate(args.prompt, args.max_new_tokens, args.raw_prompt, args.open_thinking), end="")
 
 
 if __name__ == "__main__":

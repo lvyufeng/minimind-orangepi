@@ -18,6 +18,12 @@ class GenerationResult:
         return f"{self.raw_output}generated_text: {self.generated_text}\n"
 
 
+def chat_prompt(prompt: str, open_thinking: bool = False) -> str:
+    if open_thinking:
+        return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"
+    return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+
+
 def parse_token_line(output: str, label: str) -> list[int]:
     for line in output.splitlines():
         if line.startswith(label + ":"):
@@ -43,7 +49,13 @@ class TextSession:
             raise RuntimeError("tokenizer.json requires the tokenizers package") from exc
         return Tokenizer.from_file(str(tokenizer_path))
 
-    def generate_result(self, prompt: str, max_new_tokens: int = 8) -> GenerationResult:
+    def generate_result(
+        self,
+        prompt: str,
+        max_new_tokens: int = 8,
+        raw_prompt: bool = False,
+        open_thinking: bool = False,
+    ) -> GenerationResult:
         cmd = [str(self.executable), "--max-new-tokens", str(max_new_tokens)]
         if self.model is not None:
             cmd.extend(["--model", str(self.model)])
@@ -51,7 +63,8 @@ class TextSession:
         if tokenizer is None:
             cmd.extend(["--prompt", prompt])
         else:
-            token_ids = tokenizer.encode(prompt).ids
+            formatted_prompt = prompt if raw_prompt else chat_prompt(prompt, open_thinking)
+            token_ids = tokenizer.encode(formatted_prompt).ids
             cmd.extend(["--tokens", ",".join(str(token) for token in token_ids)])
         result = subprocess.run(
             cmd,
@@ -69,5 +82,11 @@ class TextSession:
             generated_text=generated_text,
         )
 
-    def generate(self, prompt: str, max_new_tokens: int = 8) -> str:
-        return self.generate_result(prompt, max_new_tokens).format()
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 8,
+        raw_prompt: bool = False,
+        open_thinking: bool = False,
+    ) -> str:
+        return self.generate_result(prompt, max_new_tokens, raw_prompt, open_thinking).format()

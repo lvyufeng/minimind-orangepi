@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from minimind_orangepi.session import GenerationResult, parse_token_line
+from minimind_orangepi.session import GenerationResult, chat_prompt, parse_token_line
 
 
 def test_parse_token_line() -> None:
@@ -17,3 +17,8 @@ def test_generation_result_formats_decoded_text() -> None:
         generated_text="hello",
     )
     assert result.format().endswith("generated_text: hello\n")
+
+
+def test_chat_prompt_matches_minimind_markers() -> None:
+    assert chat_prompt("你好") == "<|im_start|>user\n你好<|im_end|>\n<|im_start|>assistant\n"
+    assert chat_prompt("你好", open_thinking=True).endswith("assistant\n<think>\n")
