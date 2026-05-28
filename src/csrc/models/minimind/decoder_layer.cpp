@@ -1,4 +1,5 @@
 #include "decoder_layer.h"
+#include "ascend_custom_ops.h"
 #include "ascend_matmul.h"
 
 #include <algorithm>
@@ -16,10 +17,9 @@ void require_size(const std::vector<float>& values, int64_t expected, const char
   }
 }
 
-std::vector<float> rms_norm(const std::vector<float>& input,
-                            const std::vector<float>& weight,
-                            float eps) {
-  require_size(weight, static_cast<int64_t>(input.size()), "rms_norm weight");
+std::vector<float> cpu_rms_norm(const std::vector<float>& input,
+                                const std::vector<float>& weight,
+                                float eps) {
   float sum = 0.0F;
   for (float value : input) {
     sum += value * value;
@@ -30,6 +30,19 @@ std::vector<float> rms_norm(const std::vector<float>& input,
     output[i] = input[i] * scale * weight[i];
   }
   return output;
+}
+
+std::vector<float> rms_norm(const std::vector<float>& input,
+                            const std::vector<float>& weight,
+                            float eps) {
+  require_size(weight, static_cast<int64_t>(input.size()), "rms_norm weight");
+  if (custom_ops_available() && input.size() >= 128) {
+    try {
+      return custom_rms_norm(input, weight, eps);
+    } catch (const std::exception&) {
+    }
+  }
+  return cpu_rms_norm(input, weight, eps);
 }
 
 std::vector<float> cpu_matvec(const std::vector<float>& matrix,
@@ -77,6 +90,22 @@ void apply_rope(std::vector<float>& values, int64_t heads, int64_t head_dim, int
 
 float silu(float value) {
   return value / (1.0F + std::exp(-value));
+}
+
+std::vector<float> swiglu(const std::vector<float>& gate, const std::vector<float>& up) {
+  require_size(up, static_cast<int64_t>(gate.size()), "swiglu up");
+  if (custom_ops_available() && gate.size() >= 128) {
+    try {
+      return custom_swiglu(gate, up);
+    } catch (const std::exception&) {
+    }
+  }
+
+  std::vector<float> activated(gate.size());
+  for (std::size_t i = 0; i < gate.size(); ++i) {
+    activated[i] = silu(gate[i]) * up[i];
+  }
+  return activated;
 }
 
 std::vector<float> attention_step(const MiniMindConfig& config,
@@ -203,10 +232,7 @@ std::vector<float> run_dense_decoder_layer(
       gate = matvec(expert.gate_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
       up = matvec(expert.up_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
     }
-    std::vector<float> activated(gate.size());
-    for (std::size_t i = 0; i < gate.size(); ++i) {
-      activated[i] = silu(gate[i]) * up[i];
-    }
+    const auto activated = swiglu(gate, up);
     mlp = matvec(expert.down_proj, config.hidden_size, config.moe_intermediate_size, activated);
   } else {
     std::vector<float> gate;
@@ -219,10 +245,7 @@ std::vector<float> run_dense_decoder_layer(
       gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
       up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
     }
-    std::vector<float> activated(gate.size());
-    for (std::size_t i = 0; i < gate.size(); ++i) {
-      activated[i] = silu(gate[i]) * up[i];
-    }
+    const auto activated = swiglu(gate, up);
     mlp = matvec(weights.down_proj, config.hidden_size, config.intermediate_size, activated);
   }
 

@@ -5,9 +5,8 @@ using namespace AscendC;
 namespace {
 
 struct MiniMindVectorTiling {
-  int64_t total_length;
-  int64_t tile_length;
-  float eps;
+  uint32_t total_length;
+  uint32_t tile_length;
 };
 
 constexpr int32_t kBufferNum = 2;
@@ -16,10 +15,10 @@ class KernelMiniMindRmsNorm {
  public:
   __aicore__ inline KernelMiniMindRmsNorm() = default;
 
-  __aicore__ inline void Init(GM_ADDR x, GM_ADDR weight, GM_ADDR y, const MiniMindVectorTiling* tiling) {
+  __aicore__ inline void Init(GM_ADDR x, GM_ADDR weight, GM_ADDR y, const __gm__ MiniMindVectorTiling* tiling) {
     total_length_ = tiling->total_length;
     tile_length_ = tiling->tile_length;
-    eps_ = tiling->eps;
+    eps_ = 1e-5F;
     x_.SetGlobalBuffer((__gm__ half*)x, total_length_);
     weight_.SetGlobalBuffer((__gm__ half*)weight, total_length_);
     y_.SetGlobalBuffer((__gm__ half*)y, total_length_);
@@ -32,14 +31,16 @@ class KernelMiniMindRmsNorm {
   __aicore__ inline void Process() {
     float square_sum = 0.0F;
     for (int64_t offset = 0; offset < total_length_; offset += tile_length_) {
-      const int64_t length = Min(tile_length_, total_length_ - offset);
+      const int64_t remaining = total_length_ - offset;
+      const int64_t length = tile_length_ < remaining ? tile_length_ : remaining;
       CopyInput(offset, length);
       square_sum += ComputeSquareSum(length);
     }
 
     const float scale = 1.0F / sqrt(square_sum / static_cast<float>(total_length_) + eps_);
     for (int64_t offset = 0; offset < total_length_; offset += tile_length_) {
-      const int64_t length = Min(tile_length_, total_length_ - offset);
+      const int64_t remaining = total_length_ - offset;
+      const int64_t length = tile_length_ < remaining ? tile_length_ : remaining;
       CopyInputAndWeight(offset, length);
       ComputeNorm(scale, length);
       CopyOut(offset, length);
@@ -128,7 +129,7 @@ extern "C" __global__ __aicore__ void mini_mind_rms_norm(GM_ADDR x,
                                                           GM_ADDR workspace,
                                                           GM_ADDR tiling) {
   (void)workspace;
-  const MiniMindVectorTiling* tiling_data = reinterpret_cast<const MiniMindVectorTiling*>(tiling);
+  __gm__ MiniMindVectorTiling* tiling_data = reinterpret_cast<__gm__ MiniMindVectorTiling*>(tiling);
   KernelMiniMindRmsNorm op;
   op.Init(x, weight, y, tiling_data);
   op.Process();

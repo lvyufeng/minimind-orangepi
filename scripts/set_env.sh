@@ -35,7 +35,7 @@ if [[ -n "${ASCEND_TOOLKIT_ROOT:-}" ]]; then
   done
 fi
 
-export ASCEND_CUSTOM_OPP_PATH="${ASCEND_CUSTOM_OPP_PATH:-${ROOT_DIR}/custom_opp_install}"
+export ASCEND_CUSTOM_OPP_PATH="${ASCEND_CUSTOM_OPP_PATH:-${ROOT_DIR}/custom_opp_install/vendors/minimind_orangepi}"
 export PYTHONPATH="${ROOT_DIR}/src/python:${PYTHONPATH:-}"
 
 echo "ROOT_DIR=${ROOT_DIR}"

@@ -20,7 +20,6 @@
 #endif
 
 namespace minimind::model {
-namespace {
 
 uint16_t float_to_half(float value) {
   uint32_t bits = 0;
@@ -168,48 +167,47 @@ class TensorHandle {
   aclTensor* tensor_ = nullptr;
 };
 
-class AscendRuntime {
- public:
-  AscendRuntime() {
-    const char* opp_path = std::getenv("ASCEND_OPP_PATH");
-    if (opp_path == nullptr || opp_path[0] == '\0' || !std::filesystem::exists(opp_path)) {
-      setenv("ASCEND_OPP_PATH", "/usr/local/Ascend/cann/opp", 1);
+AscendRuntime::AscendRuntime() {
+  const char* custom_opp_path = std::getenv("ASCEND_CUSTOM_OPP_PATH");
+#if defined(MINIMIND_CUSTOM_OPP_ROOT)
+  if (custom_opp_path == nullptr || custom_opp_path[0] == '\0' || !std::filesystem::exists(custom_opp_path)) {
+    std::filesystem::path custom_root = MINIMIND_CUSTOM_OPP_ROOT;
+    const auto vendor_root = custom_root / "vendors" / "minimind_orangepi";
+    if (std::filesystem::exists(vendor_root)) {
+      custom_root = vendor_root;
     }
-    check_acl(aclInit(nullptr), "aclInit failed");
-    initialized_acl_ = true;
-    check_aclnn(aclnnInit(nullptr), "aclnnInit failed");
-    initialized_aclnn_ = true;
-    check_acl(aclrtSetDevice(0), "aclrtSetDevice failed");
-    device_set_ = true;
-    check_acl(aclrtCreateStream(&stream_), "aclrtCreateStream failed");
+    setenv("ASCEND_CUSTOM_OPP_PATH", custom_root.c_str(), 1);
   }
-
-  AscendRuntime(const AscendRuntime&) = delete;
-  AscendRuntime& operator=(const AscendRuntime&) = delete;
-
-  ~AscendRuntime() {
-    if (stream_ != nullptr) {
-      (void)aclrtDestroyStream(stream_);
-    }
-    if (device_set_) {
-      (void)aclrtResetDevice(0);
-    }
-    if (initialized_aclnn_) {
-      (void)aclnnFinalize();
-    }
-    if (initialized_acl_) {
-      (void)aclFinalize();
-    }
+#endif
+  const char* opp_path = std::getenv("ASCEND_OPP_PATH");
+  if (opp_path == nullptr || opp_path[0] == '\0' || !std::filesystem::exists(opp_path)) {
+    setenv("ASCEND_OPP_PATH", "/usr/local/Ascend/cann/opp", 1);
   }
+  check_acl(aclInit(nullptr), "aclInit failed");
+  initialized_acl_ = true;
+  check_aclnn(aclnnInit(nullptr), "aclnnInit failed");
+  initialized_aclnn_ = true;
+  check_acl(aclrtSetDevice(0), "aclrtSetDevice failed");
+  device_set_ = true;
+  check_acl(aclrtCreateStream(&stream_), "aclrtCreateStream failed");
+}
 
-  aclrtStream stream() const noexcept { return stream_; }
+AscendRuntime::~AscendRuntime() {
+  if (stream_ != nullptr) {
+    (void)aclrtDestroyStream(stream_);
+  }
+  if (device_set_) {
+    (void)aclrtResetDevice(0);
+  }
+  if (initialized_aclnn_) {
+    (void)aclnnFinalize();
+  }
+  if (initialized_acl_) {
+    (void)aclFinalize();
+  }
+}
 
- private:
-  bool initialized_acl_ = false;
-  bool initialized_aclnn_ = false;
-  bool device_set_ = false;
-  aclrtStream stream_ = nullptr;
-};
+aclrtStream AscendRuntime::stream() const noexcept { return stream_; }
 
 struct CachedMatrix {
   int64_t rows = 0;
@@ -221,6 +219,8 @@ AscendRuntime& runtime() {
   static AscendRuntime instance;
   return instance;
 }
+
+namespace {
 
 const CachedMatrix& cached_matrix(const std::vector<float>& matrix, int64_t rows, int64_t cols) {
   static std::mutex mutex;
@@ -252,9 +252,9 @@ const CachedMatrix& cached_matrix(const std::vector<float>& matrix, int64_t rows
   return inserted->second;
 }
 
-#endif
-
 }  // namespace
+
+#endif
 
 bool cube_matvec_available() {
 #if defined(MINIMIND_USE_ASCEND)

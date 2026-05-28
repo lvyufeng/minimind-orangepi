@@ -5,8 +5,8 @@ using namespace AscendC;
 namespace {
 
 struct MiniMindVectorTiling {
-  int64_t total_length;
-  int64_t tile_length;
+  uint32_t total_length;
+  uint32_t tile_length;
 };
 
 constexpr int32_t kBufferNum = 2;
@@ -15,7 +15,7 @@ class KernelMiniMindSwiGlu {
  public:
   __aicore__ inline KernelMiniMindSwiGlu() = default;
 
-  __aicore__ inline void Init(GM_ADDR gate, GM_ADDR up, GM_ADDR y, const MiniMindVectorTiling* tiling) {
+  __aicore__ inline void Init(GM_ADDR gate, GM_ADDR up, GM_ADDR y, const __gm__ MiniMindVectorTiling* tiling) {
     total_length_ = tiling->total_length;
     tile_length_ = tiling->tile_length;
     block_length_ = (total_length_ + GetBlockNum() - 1) / GetBlockNum();
@@ -34,7 +34,8 @@ class KernelMiniMindSwiGlu {
 
   __aicore__ inline void Process() {
     for (int64_t offset = 0; offset < block_length_; offset += tile_length_) {
-      const int64_t length = Min(tile_length_, block_length_ - offset);
+      const int64_t remaining = block_length_ - offset;
+      const int64_t length = tile_length_ < remaining ? tile_length_ : remaining;
       CopyIn(offset, length);
       Compute(length);
       CopyOut(offset, length);
@@ -96,7 +97,7 @@ extern "C" __global__ __aicore__ void mini_mind_swi_glu(GM_ADDR gate,
                                                          GM_ADDR workspace,
                                                          GM_ADDR tiling) {
   (void)workspace;
-  const MiniMindVectorTiling* tiling_data = reinterpret_cast<const MiniMindVectorTiling*>(tiling);
+  __gm__ MiniMindVectorTiling* tiling_data = reinterpret_cast<__gm__ MiniMindVectorTiling*>(tiling);
   KernelMiniMindSwiGlu op;
   op.Init(gate, up, y, tiling_data);
   op.Process();

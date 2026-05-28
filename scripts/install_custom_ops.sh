@@ -28,6 +28,15 @@ export ASCEND_HOME_PATH="${ASCEND_TOOLKIT_ROOT}"
 export ASCEND_OPP_PATH="${ASCEND_OPP_PATH:-${ASCEND_TOOLKIT_ROOT}/opp}"
 export ASCEND_AICPU_PATH="${ASCEND_AICPU_PATH:-${ASCEND_TOOLKIT_ROOT}}"
 export TOOLCHAIN_HOME="${TOOLCHAIN_HOME:-${ASCEND_TOOLKIT_ROOT}/toolkit}"
+for bin_dir in \
+  "${ASCEND_TOOLKIT_ROOT}/bin" \
+  "${ASCEND_TOOLKIT_ROOT}/aarch64-linux/bin" \
+  "${ASCEND_TOOLKIT_ROOT}/x86_64-linux/bin" \
+  "${ASCEND_TOOLKIT_ROOT}/tools/bisheng_compiler/bin"; do
+  if [[ -d "${bin_dir}" ]]; then
+    export PATH="${bin_dir}:${PATH}"
+  fi
+done
 for lib_dir in \
   "${ASCEND_TOOLKIT_ROOT}/lib64" \
   "${ASCEND_TOOLKIT_ROOT}/aarch64-linux/lib64" \
@@ -52,7 +61,7 @@ fi
 
 rm -rf "${CUSTOM_OP_BUILD}"
 mkdir -p "${CUSTOM_OP_BUILD}"
-cp -a "${TEMPLATE_DIR}/." "${CUSTOM_OP_BUILD}/"
+cp -aL "${TEMPLATE_DIR}/." "${CUSTOM_OP_BUILD}/"
 find "${CUSTOM_OP_BUILD}/op_host" -maxdepth 1 -type f ! -name CMakeLists.txt -delete
 find "${CUSTOM_OP_BUILD}/op_kernel" -maxdepth 1 -type f -delete
 cp -a "${CUSTOM_OP_SRC}/op_host/." "${CUSTOM_OP_BUILD}/op_host/"
@@ -72,6 +81,7 @@ path.write_text(json.dumps(data, indent=4) + "\n")
 PY
 
 cmake -S "${CUSTOM_OP_BUILD}" -B "${CUSTOM_OP_BUILD}/build_out" --preset=default
+cmake --build "${CUSTOM_OP_BUILD}/build_out" --target binary -j"$(nproc)"
 cmake --build "${CUSTOM_OP_BUILD}/build_out" --target install -j"$(nproc)"
 
 mkdir -p "${CUSTOM_OPP_INSTALL}"

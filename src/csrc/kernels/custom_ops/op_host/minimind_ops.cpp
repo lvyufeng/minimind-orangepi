@@ -6,11 +6,10 @@
 namespace {
 
 constexpr uint32_t kSuccess = ge::GRAPH_SUCCESS;
-constexpr int64_t kDefaultTileLength = 256;
+constexpr uint32_t kDefaultTileLength = 256;
 struct MiniMindVectorTiling {
-  int64_t total_length;
-  int64_t tile_length;
-  float eps;
+  uint32_t total_length;
+  uint32_t tile_length;
 };
 
 uint32_t infer_like_input0(gert::InferShapeContext* context) {
@@ -48,19 +47,10 @@ uint32_t tile_vector_op(gert::TilingContext* context) {
 
   const int64_t total_length = shape_num_elements(input->GetStorageShape());
   const uint32_t blocks = 1;
-  tiling->total_length = total_length;
+  tiling->total_length = static_cast<uint32_t>(total_length);
   tiling->tile_length = kDefaultTileLength;
-  tiling->eps = 1e-5F;
 
-  const gert::RuntimeAttrs* attrs = context->GetAttrs();
-  if (attrs != nullptr && attrs->GetAttrNum() > 0) {
-    const float* eps = attrs->GetFloat(0);
-    if (eps != nullptr) {
-      tiling->eps = *eps;
-    }
-  }
-
-  if (context->SetBlockDim(blocks) != ge::GRAPH_SUCCESS || context->SetTilingKey(1) != ge::GRAPH_SUCCESS) {
+  if (context->SetBlockDim(blocks) != ge::GRAPH_SUCCESS || context->SetTilingKey(0) != ge::GRAPH_SUCCESS) {
     return ge::GRAPH_FAILED;
   }
   return kSuccess;
