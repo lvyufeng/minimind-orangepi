@@ -1,6 +1,7 @@
 #include "ascend_custom_ops.h"
 #include "ascend_matmul.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -11,6 +12,7 @@
 #include <acl/acl.h>
 #include <aclnn/aclnn_base.h>
 #include <aclnn_mini_mind_rms_norm.h>
+#include <aclnn_mini_mind_rope.h>
 #include <aclnn_mini_mind_swi_glu.h>
 #endif
 
@@ -202,6 +204,61 @@ std::vector<float> custom_swiglu(const std::vector<float>& gate,
   return copy_half_to_host(output_device, gate.size());
 #else
   throw std::runtime_error("custom_swiglu is unavailable");
+#endif
+}
+
+std::vector<float> custom_rope(const std::vector<float>& input,
+                               int64_t heads,
+                               int64_t head_dim,
+                               int64_t position,
+                               float theta) {
+#if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
+  if (heads <= 0 || head_dim <= 0 || head_dim % 2 != 0 || static_cast<int64_t>(input.size()) != heads * head_dim) {
+    throw std::invalid_argument("custom_rope shape mismatch");
+  }
+  (void)runtime();
+
+  const int64_t half_dim = head_dim / 2;
+  std::vector<float> cos_table(static_cast<std::size_t>(half_dim));
+  std::vector<float> sin_table(static_cast<std::size_t>(half_dim));
+  for (int64_t dim = 0; dim < half_dim; ++dim) {
+    const float inv_freq = 1.0F / std::pow(theta, static_cast<float>(dim * 2) / static_cast<float>(head_dim));
+    const float angle = static_cast<float>(position) * inv_freq;
+    cos_table[static_cast<std::size_t>(dim)] = std::cos(angle);
+    sin_table[static_cast<std::size_t>(dim)] = std::sin(angle);
+  }
+
+  DeviceBuffer input_device = copy_half_to_device(input);
+  DeviceBuffer cos_device = copy_half_to_device(cos_table);
+  DeviceBuffer sin_device = copy_half_to_device(sin_table);
+  DeviceBuffer output_device(input.size() * sizeof(uint16_t));
+
+  const int64_t dims[2] = {heads, head_dim};
+  const int64_t strides[2] = {head_dim, 1};
+  const int64_t table_dims[1] = {half_dim};
+  const int64_t table_strides[1] = {1};
+  TensorHandle x(dims, strides, 2, input_device.data());
+  TensorHandle cos_tensor(table_dims, table_strides, 1, cos_device.data());
+  TensorHandle sin_tensor(table_dims, table_strides, 1, sin_device.data());
+  TensorHandle out(dims, strides, 2, output_device.data());
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* executor = nullptr;
+  check_aclnn(aclnnMiniMindRopeGetWorkspaceSize(x.get(), cos_tensor.get(), sin_tensor.get(), out.get(),
+                                                &workspace_size, &executor),
+              "aclnnMiniMindRopeGetWorkspaceSize failed");
+  DeviceBuffer workspace(workspace_size);
+  check_aclnn(aclnnMiniMindRope(workspace.data(), workspace_size, executor, runtime().stream()),
+              "aclnnMiniMindRope failed");
+  check_acl(aclrtSynchronizeStream(runtime().stream()), "aclrtSynchronizeStream failed");
+  return copy_half_to_host(output_device, input.size());
+#else
+  (void)input;
+  (void)heads;
+  (void)head_dim;
+  (void)position;
+  (void)theta;
+  throw std::runtime_error("custom_rope is unavailable");
 #endif
 }
 

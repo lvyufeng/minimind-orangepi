@@ -52,5 +52,29 @@ int main() {
     CHECK(std::fabs(activated[i] - silu * up[i]) < 5e-2F);
   }
 
+  std::vector<float> rope_input(192);
+  for (std::size_t i = 0; i < rope_input.size(); ++i) {
+    rope_input[i] = static_cast<float>(static_cast<int>(i % 19) - 9) * 0.03125F;
+  }
+  const int64_t heads = 2;
+  const int64_t head_dim = 96;
+  const int64_t position = 7;
+  const float theta = 1000000.0F;
+  const auto rope_output = minimind::model::custom_rope(rope_input, heads, head_dim, position, theta);
+  CHECK(rope_output.size() == rope_input.size());
+  for (int64_t head = 0; head < heads; ++head) {
+    const std::size_t base = static_cast<std::size_t>(head * head_dim);
+    for (int64_t dim = 0; dim < head_dim / 2; ++dim) {
+      const float inv_freq = 1.0F / std::pow(theta, static_cast<float>(dim * 2) / static_cast<float>(head_dim));
+      const float angle = static_cast<float>(position) * inv_freq;
+      const float c = std::cos(angle);
+      const float s = std::sin(angle);
+      const float first = rope_input[base + static_cast<std::size_t>(dim)];
+      const float second = rope_input[base + static_cast<std::size_t>(dim + head_dim / 2)];
+      CHECK(std::fabs(rope_output[base + static_cast<std::size_t>(dim)] - (first * c - second * s)) < 5e-2F);
+      CHECK(std::fabs(rope_output[base + static_cast<std::size_t>(dim + head_dim / 2)] - (second * c + first * s)) < 5e-2F);
+    }
+  }
+
   return 0;
 }

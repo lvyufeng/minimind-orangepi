@@ -73,6 +73,14 @@ std::vector<float> matvec(const std::vector<float>& matrix,
 }
 
 void apply_rope(std::vector<float>& values, int64_t heads, int64_t head_dim, int64_t position, float theta) {
+  require_size(values, heads * head_dim, "rope input");
+  if (custom_ops_available() && values.size() >= 128) {
+    try {
+      values = custom_rope(values, heads, head_dim, position, theta);
+      return;
+    } catch (const std::exception&) {
+    }
+  }
   for (int64_t head = 0; head < heads; ++head) {
     float* base = values.data() + head * head_dim;
     for (int64_t dim = 0; dim < head_dim / 2; ++dim) {

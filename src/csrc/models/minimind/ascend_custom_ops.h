@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 namespace minimind::model {
@@ -12,5 +13,11 @@ std::vector<float> custom_rms_norm(const std::vector<float>& input,
 
 std::vector<float> custom_swiglu(const std::vector<float>& gate,
                                  const std::vector<float>& up);
+
+std::vector<float> custom_rope(const std::vector<float>& input,
+                               int64_t heads,
+                               int64_t head_dim,
+                               int64_t position,
+                               float theta);
 
 }  // namespace minimind::model
