@@ -19,6 +19,17 @@ if ! find "${CHECKPOINT_DIR}" -maxdepth 1 \( -name '*.safetensors' -o -name 'pyt
   exit 1
 fi
 
+if [[ -f "${CHECKPOINT_DIR}/tokenizer.json" ]]; then
+  if ! python3 - <<'PY' >/dev/null 2>&1
+import tokenizers
+PY
+  then
+    echo "tokenizer.json is present, but the Python 'tokenizers' package is not installed." >&2
+    echo "Install it to decode prompts/text via run_text.py, or use build/minimind_generate --tokens directly." >&2
+    exit 1
+  fi
+fi
+
 "${ROOT_DIR}/scripts/build.sh"
 python3 "${ROOT_DIR}/src/python/tools/inspect_minimind_checkpoint.py" "${CHECKPOINT_DIR}"
 python3 "${ROOT_DIR}/src/python/tools/export_minimind_runtime.py" --model "${CHECKPOINT_DIR}" --output "${RUNTIME_DIR}"
