@@ -104,29 +104,30 @@ By default, the Python wrapper applies the MiniMind chat markers. Use `--raw-pro
 
 ## Gradio text demo
 
-The Gradio demo is text-only and streams generated tokens into the output box. It does not support MiniMind-V image-text inference or MiniMind-O omni/audio inference.
+The Gradio demo is text-only and provides a contextual chat UI. It preserves the visible chat history, formats it with MiniMind chat markers, and streams the assistant response into the latest chat message. It does not support MiniMind-V image-text inference or MiniMind-O omni/audio inference.
 
-Install the optional demo dependency:
+Install the optional demo dependency in a Python 3.10+ environment. The tested setup uses a dedicated conda environment:
 
 ```bash
-python3 -m pip install -r requirements-demo.txt
+conda create -y -n minimind-gradio python=3.10 pip
+conda run -n minimind-gradio python -m pip install -r requirements-demo.txt
 ```
 
 Smoke test without real weights; this intentionally uses the native toy fallback:
 
 ```bash
-python3 src/python/tools/gradio_text_demo.py --max-new-tokens 2
+conda run -n minimind-gradio python src/python/tools/gradio_text_demo.py --max-new-tokens 2
 ```
 
 Run with an exported MiniMind text runtime model:
 
 ```bash
-python3 src/python/tools/gradio_text_demo.py \
+conda run -n minimind-gradio python src/python/tools/gradio_text_demo.py \
   --model models/minimind-runtime \
   --max-new-tokens 32
 ```
 
-If the runtime directory includes `tokenizer.json`, install `tokenizers` to show decoded text. If `--model` is provided, the demo validates that the directory contains `minimind_runtime_config.txt` and `weights.bin` instead of silently falling back to the toy model.
+If the runtime directory includes `tokenizer.json`, install `tokenizers` to show decoded text. If `--model` is provided, the demo validates that the directory contains `minimind_runtime_config.txt` and `weights.bin` instead of silently falling back to the toy model. The raw prompt checkbox is a single-turn debugging mode; leave it disabled for normal contextual chat.
 
 The native CLI also has an opt-in streaming mode:
 

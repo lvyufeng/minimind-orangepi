@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Sequence
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,30 @@ def chat_prompt(prompt: str, open_thinking: bool = False) -> str:
     if open_thinking:
         return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"
     return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+
+
+def chat_prompt_from_history(
+    history: Sequence[tuple[str, str | None]],
+    open_thinking: bool = False,
+) -> str:
+    if not history:
+        raise ValueError("history cannot be empty")
+    parts: list[str] = []
+    for index, (user_text, assistant_text) in enumerate(history):
+        if not user_text.strip():
+            raise ValueError("history contains an empty user message")
+        parts.append(f"<|im_start|>user\n{user_text}<|im_end|>\n")
+        is_last = index == len(history) - 1
+        if is_last:
+            if assistant_text:
+                parts.append(f"<|im_start|>assistant\n{assistant_text}<|im_end|>\n")
+            if open_thinking:
+                parts.append("<|im_start|>assistant\n<think>\n")
+            else:
+                parts.append("<|im_start|>assistant\n")
+        elif assistant_text:
+            parts.append(f"<|im_start|>assistant\n{assistant_text}<|im_end|>\n")
+    return "".join(parts)
 
 
 def validate_runtime_model_dir(model: Path | None) -> None:
@@ -169,6 +193,15 @@ class TextSession:
             raise
         if return_code != 0:
             raise subprocess.CalledProcessError(return_code, cmd, output="".join(raw_lines), stderr=stderr)
+
+    def stream_generate_chat_result(
+        self,
+        history: Sequence[tuple[str, str | None]],
+        max_new_tokens: int = 8,
+        open_thinking: bool = False,
+    ) -> Iterator[GenerationResult]:
+        prompt = chat_prompt_from_history(history, open_thinking)
+        yield from self.stream_generate_result(prompt, max_new_tokens, True, False)
 
     def generate(
         self,

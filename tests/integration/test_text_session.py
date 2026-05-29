@@ -8,6 +8,7 @@ from minimind_orangepi.session import (
     GenerationResult,
     TextSession,
     chat_prompt,
+    chat_prompt_from_history,
     parse_stream_token_line,
     parse_token_line,
     validate_runtime_model_dir,
@@ -33,6 +34,31 @@ def test_generation_result_formats_decoded_text() -> None:
 def test_chat_prompt_matches_minimind_markers() -> None:
     assert chat_prompt("你好") == "<|im_start|>user\n你好<|im_end|>\n<|im_start|>assistant\n"
     assert chat_prompt("你好", open_thinking=True).endswith("assistant\n<think>\n")
+
+
+def test_chat_prompt_from_history_matches_single_turn_prompt() -> None:
+    assert chat_prompt_from_history([("你好", "")]) == chat_prompt("你好")
+
+
+def test_chat_prompt_from_history_includes_previous_turns() -> None:
+    prompt = chat_prompt_from_history([("你好", "您好"), ("你是谁", "")])
+    assert prompt == (
+        "<|im_start|>user\n你好<|im_end|>\n"
+        "<|im_start|>assistant\n您好<|im_end|>\n"
+        "<|im_start|>user\n你是谁<|im_end|>\n"
+        "<|im_start|>assistant\n"
+    )
+
+
+def test_chat_prompt_from_history_applies_thinking_to_final_turn_only() -> None:
+    prompt = chat_prompt_from_history([("你好", "您好"), ("继续", "")], open_thinking=True)
+    assert prompt.count("<think>") == 1
+    assert prompt.endswith("<|im_start|>assistant\n<think>\n")
+
+
+def test_chat_prompt_from_history_rejects_empty_history() -> None:
+    with pytest.raises(ValueError, match="history cannot be empty"):
+        chat_prompt_from_history([])
 
 
 def test_validate_runtime_model_dir_allows_toy_fallback() -> None:
@@ -86,3 +112,13 @@ def test_text_session_stream_matches_blocking_toy_generation() -> None:
     assert streamed
     assert streamed[-1].generated_tokens == blocking.generated_tokens
     assert streamed[-1].prompt_tokens == blocking.prompt_tokens
+
+
+def test_text_session_streams_chat_history_with_toy_generation() -> None:
+    root = Path(__file__).resolve().parents[2]
+    session = TextSession(root / "build" / "minimind_generate", None)
+    history = [("hi", "hello"), ("who are you", "")]
+    streamed = list(session.stream_generate_chat_result(history, 3))
+    assert streamed
+    assert streamed[-1].generated_tokens
+    assert streamed[-1].prompt_tokens

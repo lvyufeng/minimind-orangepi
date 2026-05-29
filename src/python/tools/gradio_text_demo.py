@@ -57,6 +57,97 @@ def generate_text(
         yield f"Error: {exc}", mode
 
 
+def chat_content_to_text(content) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        for key in ("text", "content", "value"):
+            if key in content:
+                return chat_content_to_text(content[key])
+        return ""
+    if isinstance(content, (list, tuple)):
+        return "".join(chat_content_to_text(item) for item in content)
+    return str(content)
+
+
+def message_field(message, name: str, default=""):
+    if isinstance(message, dict):
+        return message.get(name, default)
+    return getattr(message, name, default)
+
+
+def history_to_messages(history: list[tuple[str, str | None]]) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for user_text, assistant_text in history:
+        messages.append({"role": "user", "content": user_text})
+        if assistant_text is not None:
+            messages.append({"role": "assistant", "content": assistant_text})
+    return messages
+
+
+def messages_to_history(messages: list[dict[str, str]] | None) -> list[tuple[str, str | None]]:
+    history: list[tuple[str, str | None]] = []
+    if not messages:
+        return history
+    pending_user: str | None = None
+    for message in messages:
+        role = message_field(message, "role")
+        content = chat_content_to_text(message_field(message, "content", ""))
+        if role == "user":
+            if pending_user is not None:
+                history.append((pending_user, ""))
+            pending_user = content
+        elif role == "assistant" and pending_user is not None:
+            history.append((pending_user, content))
+            pending_user = None
+    if pending_user is not None:
+        history.append((pending_user, ""))
+    return history
+
+
+def generate_chat(
+    session: TextSession,
+    mode: str,
+    message: str,
+    messages: list[dict[str, str]] | None,
+    max_new_tokens: int,
+    raw_prompt: bool,
+    open_thinking: bool,
+):
+    history = messages_to_history(messages)
+    message_text = chat_content_to_text(message)
+    if not message_text.strip():
+        yield history_to_messages(history), "", "Please enter a prompt."
+        return
+    active_history = history + [(message_text, "")]
+    if raw_prompt:
+        stream = session.stream_generate_result(message_text, int(max_new_tokens), True, open_thinking)
+    else:
+        stream = session.stream_generate_chat_result(active_history, int(max_new_tokens), open_thinking)
+    yield history_to_messages(active_history), "", mode
+    try:
+        yielded = False
+        for result in stream:
+            yielded = True
+            active_history[-1] = (message_text, output_text(result))
+            yield history_to_messages(active_history), "", format_details(result, mode)
+        if not yielded:
+            yield history_to_messages(active_history), "", mode
+    except subprocess.CalledProcessError as exc:
+        error = exc.stderr.strip() or exc.output.strip() or str(exc)
+        active_history[-1] = (message_text, f"Runtime error:\n{error}")
+        yield history_to_messages(active_history), "", mode
+    except Exception as exc:
+        active_history[-1] = (message_text, f"Error: {exc}")
+        yield history_to_messages(active_history), "", mode
+
+
+def clear_chat(mode: str):
+    return [], "", mode
+
+
 def build_demo(
     session: TextSession,
     mode: str,
@@ -72,8 +163,13 @@ def build_demo(
             "Text-only MiniMind runtime demo. MiniMind-V and MiniMind-O inference are not supported here."
         )
         with gr.Row():
-            with gr.Column():
-                prompt = gr.Textbox(label="Prompt", value="你好", lines=5)
+            with gr.Column(scale=3):
+                chatbot = gr.Chatbot(label="Chat", height=480)
+                prompt = gr.Textbox(label="Message", value="你好", lines=3)
+                with gr.Row():
+                    submit = gr.Button("Send", variant="primary")
+                    clear = gr.Button("Clear")
+            with gr.Column(scale=1):
                 max_new_tokens = gr.Slider(
                     label="Max new tokens",
                     minimum=1,
@@ -81,24 +177,38 @@ def build_demo(
                     step=1,
                     value=default_max_new_tokens,
                 )
-                raw_prompt = gr.Checkbox(label="Raw prompt", value=default_raw_prompt)
+                raw_prompt = gr.Checkbox(
+                    label="Raw prompt (single-turn debug)",
+                    value=default_raw_prompt,
+                )
                 open_thinking = gr.Checkbox(label="Open thinking marker", value=default_open_thinking)
-                submit = gr.Button("Generate", variant="primary")
-            with gr.Column():
-                output = gr.Textbox(label="Generated text / runtime output", lines=12)
-                details = gr.Textbox(label="Runtime details", value=mode, lines=6)
+                details = gr.Textbox(label="Runtime details", value=mode, lines=10)
 
-        submit.click(
-            fn=lambda prompt_value, token_value, raw_value, thinking_value: generate_text(
+        def generate_chat_for_ui(message_value, history_value, token_value, raw_value, thinking_value):
+            yield from generate_chat(
                 session,
                 mode,
-                prompt_value,
+                message_value,
+                history_value or [],
                 token_value,
                 raw_value,
                 thinking_value,
-            ),
-            inputs=[prompt, max_new_tokens, raw_prompt, open_thinking],
-            outputs=[output, details],
+            )
+
+        submit.click(
+            fn=generate_chat_for_ui,
+            inputs=[prompt, chatbot, max_new_tokens, raw_prompt, open_thinking],
+            outputs=[chatbot, prompt, details],
+        )
+        prompt.submit(
+            fn=generate_chat_for_ui,
+            inputs=[prompt, chatbot, max_new_tokens, raw_prompt, open_thinking],
+            outputs=[chatbot, prompt, details],
+        )
+        clear.click(
+            fn=lambda: clear_chat(mode),
+            inputs=None,
+            outputs=[chatbot, prompt, details],
         )
     return demo
 
