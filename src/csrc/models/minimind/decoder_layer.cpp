@@ -271,8 +271,11 @@ std::vector<float> run_dense_decoder_layer(
   apply_rope(key, config.num_key_value_heads, config.head_dim, position, config.rope_theta,
              config.max_position_embeddings);
 
-  cache.keys.insert(cache.keys.end(), key.begin(), key.end());
-  cache.values.insert(cache.values.end(), value.begin(), value.end());
+  const bool use_resident_attention = custom_ops_available() && config.hidden_size >= 128 && config.head_dim <= 128;
+  if (!use_resident_attention) {
+    cache.keys.insert(cache.keys.end(), key.begin(), key.end());
+    cache.values.insert(cache.values.end(), value.begin(), value.end());
+  }
   cache.tokens += 1;
 
   auto context = attention_step(config, query, key, value, cache);
