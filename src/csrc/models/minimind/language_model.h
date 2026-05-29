@@ -26,6 +26,7 @@ class LanguageModel {
   const MiniMindConfig& config() const noexcept { return config_; }
   DecoderState make_state() const;
   std::vector<float> forward_token(int32_t token, DecoderState& state) const;
+  int32_t forward_next_token(int32_t token, DecoderState& state) const;
   std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                 int64_t max_new_tokens) const;
 

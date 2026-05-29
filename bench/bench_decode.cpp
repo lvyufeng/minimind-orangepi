@@ -61,17 +61,16 @@ std::vector<int32_t> decode_fixed_steps(const minimind::model::LanguageModel& mo
                                         const std::vector<int32_t>& input_tokens,
                                         int64_t decode_tokens) {
   auto state = model.make_state();
-  std::vector<float> logits;
+  int32_t next = 0;
   for (int32_t token : input_tokens) {
-    logits = model.forward_token(token, state);
+    next = model.forward_next_token(token, state);
   }
 
   std::vector<int32_t> generated;
   generated.reserve(static_cast<std::size_t>(decode_tokens));
   for (int64_t i = 0; i < decode_tokens; ++i) {
-    const int32_t next = minimind::model::argmax_token(logits);
     generated.push_back(next);
-    logits = model.forward_token(next, state);
+    next = model.forward_next_token(next, state);
   }
   return generated;
 }

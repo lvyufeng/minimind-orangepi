@@ -152,6 +152,25 @@ std::vector<float> LanguageModel::forward_token(int32_t token, DecoderState& sta
   return matvec(weights_.lm_head, config_.vocab_size, config_.hidden_size, hidden);
 }
 
+int32_t LanguageModel::forward_next_token(int32_t token, DecoderState& state) const {
+  auto hidden = embedding_row(weights_.embed_tokens, config_.vocab_size, config_.hidden_size, token);
+  for (int64_t layer = 0; layer < config_.num_hidden_layers; ++layer) {
+    hidden = run_dense_decoder_layer(config_, weights_.layers[static_cast<std::size_t>(layer)],
+                                     state.layers[static_cast<std::size_t>(layer)], hidden,
+                                     state.position);
+  }
+  state.position += 1;
+
+  hidden = rms_norm(hidden, weights_.final_norm, config_.rms_norm_eps);
+  if (cube_matvec_available() && config_.vocab_size >= 128 && config_.hidden_size >= 128) {
+    try {
+      return cube_matvec_argmax(weights_.lm_head, config_.vocab_size, config_.hidden_size, hidden);
+    } catch (const std::exception&) {
+    }
+  }
+  return argmax_token(matvec(weights_.lm_head, config_.vocab_size, config_.hidden_size, hidden));
+}
+
 std::vector<int32_t> LanguageModel::generate(const std::vector<int32_t>& prompt_tokens,
                                              int64_t max_new_tokens) const {
   if (prompt_tokens.empty()) {
@@ -162,20 +181,19 @@ std::vector<int32_t> LanguageModel::generate(const std::vector<int32_t>& prompt_
   }
 
   DecoderState state = make_state();
-  std::vector<float> logits;
+  int32_t next = 0;
   for (int32_t token : prompt_tokens) {
-    logits = forward_token(token, state);
+    next = forward_next_token(token, state);
   }
 
   std::vector<int32_t> generated;
   generated.reserve(static_cast<std::size_t>(max_new_tokens));
   for (int64_t i = 0; i < max_new_tokens; ++i) {
-    const int32_t next = argmax_token(logits);
     generated.push_back(next);
     if (next == config_.eos_token_id) {
       break;
     }
-    logits = forward_token(next, state);
+    next = forward_next_token(next, state);
   }
   return generated;
 }
