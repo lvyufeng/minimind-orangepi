@@ -2,6 +2,7 @@
 #include "../src/csrc/models/minimind/runtime_loader.h"
 #include "minimind_orangepi/tokenizer.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -77,27 +78,43 @@ std::vector<int32_t> decode_fixed_steps(const minimind::model::LanguageModel& mo
   return generated;
 }
 
-double timed_decode_fixed_steps(const minimind::model::LanguageModel& model,
-                                const std::vector<int32_t>& input_tokens,
-                                int64_t decode_tokens,
-                                std::vector<int32_t>& generated) {
+struct TimingResult {
+  double prefill_seconds = 0.0;
+  double decode_seconds = 0.0;
+  int64_t prefill_tokens = 0;
+  int64_t decode_steps = 0;
+};
+
+TimingResult timed_decode_fixed_steps(const minimind::model::LanguageModel& model,
+                                      const std::vector<int32_t>& input_tokens,
+                                      int64_t decode_tokens,
+                                      std::vector<int32_t>& generated) {
   auto state = model.make_state();
   int32_t next = 0;
+
+  const auto prefill_start = std::chrono::steady_clock::now();
   for (int32_t token : input_tokens) {
     next = model.forward_next_token(token, state);
   }
+  const auto prefill_end = std::chrono::steady_clock::now();
 
   generated.clear();
   generated.reserve(static_cast<std::size_t>(decode_tokens));
-  const auto start = std::chrono::steady_clock::now();
+  const auto decode_start = std::chrono::steady_clock::now();
   for (int64_t i = 0; i < decode_tokens; ++i) {
     generated.push_back(next);
     if (i + 1 < decode_tokens) {
       next = model.forward_next_token(next, state);
     }
   }
-  const auto end = std::chrono::steady_clock::now();
-  return std::chrono::duration<double>(end - start).count();
+  const auto decode_end = std::chrono::steady_clock::now();
+
+  TimingResult timing;
+  timing.prefill_seconds = std::chrono::duration<double>(prefill_end - prefill_start).count();
+  timing.decode_seconds = std::chrono::duration<double>(decode_end - decode_start).count();
+  timing.prefill_tokens = static_cast<int64_t>(input_tokens.size());
+  timing.decode_steps = std::max<int64_t>(0, decode_tokens - 1);
+  return timing;
 }
 
 }  // namespace
@@ -119,14 +136,21 @@ int main(int argc, char** argv) {
   }
 
   std::vector<int32_t> generated;
-  const double seconds = timed_decode_fixed_steps(model, tokens, decode_tokens, generated);
-  const double tokens_per_second = generated.empty() || seconds == 0.0
-                                       ? 0.0
-                                       : static_cast<double>(generated.size()) / seconds;
+  const auto timing = timed_decode_fixed_steps(model, tokens, decode_tokens, generated);
+  const double decode_tokens_per_second = timing.decode_steps == 0 || timing.decode_seconds == 0.0
+                                              ? 0.0
+                                              : static_cast<double>(timing.decode_steps) / timing.decode_seconds;
+  const double prefill_tokens_per_second = timing.prefill_tokens == 0 || timing.prefill_seconds == 0.0
+                                               ? 0.0
+                                               : static_cast<double>(timing.prefill_tokens) / timing.prefill_seconds;
 
   std::cout << "prompt_tokens=" << tokens.size() << '\n';
   std::cout << "generated_tokens=" << generated.size() << '\n';
-  std::cout << "seconds=" << seconds << '\n';
-  std::cout << "tokens_per_second=" << tokens_per_second << '\n';
+  std::cout << "prefill_tokens=" << timing.prefill_tokens << '\n';
+  std::cout << "prefill_seconds=" << timing.prefill_seconds << '\n';
+  std::cout << "prefill_tokens_per_second=" << prefill_tokens_per_second << '\n';
+  std::cout << "decode_steps=" << timing.decode_steps << '\n';
+  std::cout << "decode_seconds=" << timing.decode_seconds << '\n';
+  std::cout << "decode_tokens_per_second=" << decode_tokens_per_second << '\n';
   return 0;
 }
