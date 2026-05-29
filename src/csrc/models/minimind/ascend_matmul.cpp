@@ -289,22 +289,22 @@ std::vector<float> cube_matvec(const std::vector<float>& matrix,
             "aclrtMemcpy input H2D failed");
 
   const int64_t matrix_dims[2] = {rows, cols};
-  const int64_t input_dims[1] = {cols};
-  const int64_t out_dims[1] = {rows};
+  const int64_t input_dims[2] = {cols, 1};
+  const int64_t out_dims[2] = {rows, 1};
   const int64_t matrix_strides[2] = {cols, 1};
-  const int64_t input_strides[1] = {1};
-  const int64_t out_strides[1] = {1};
+  const int64_t input_strides[2] = {1, 1};
+  const int64_t out_strides[2] = {1, 1};
   TensorHandle lhs(matrix_dims, matrix_strides, 2, weight.device.data());
-  TensorHandle rhs(input_dims, input_strides, 1, input_device.data());
-  TensorHandle out(out_dims, out_strides, 1, output_device.data());
+  TensorHandle rhs(input_dims, input_strides, 2, input_device.data());
+  TensorHandle out(out_dims, out_strides, 2, output_device.data());
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
   constexpr int8_t cube_math_type = 0;
-  check_aclnn(aclnnMvGetWorkspaceSize(lhs.get(), rhs.get(), out.get(), cube_math_type, &workspace_size, &executor),
-              "aclnnMvGetWorkspaceSize failed");
+  check_aclnn(aclnnMmGetWorkspaceSize(lhs.get(), rhs.get(), out.get(), cube_math_type, &workspace_size, &executor),
+              "aclnnMmGetWorkspaceSize failed");
   DeviceBuffer workspace(workspace_size);
-  check_aclnn(aclnnMv(workspace.data(), workspace_size, executor, rt.stream()), "aclnnMv failed");
+  check_aclnn(aclnnMm(workspace.data(), workspace_size, executor, rt.stream()), "aclnnMm failed");
   check_acl(aclrtSynchronizeStream(rt.stream()), "aclrtSynchronizeStream failed");
   check_acl(aclrtMemcpy(output_half.data(), output_half.size() * sizeof(uint16_t), output_device.data(),
                         output_device.bytes(), ACL_MEMCPY_DEVICE_TO_HOST),
