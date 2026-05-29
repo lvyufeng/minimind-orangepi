@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from minimind_orangepi.session import GenerationResult, chat_prompt, parse_token_line, validate_runtime_model_dir
+from minimind_orangepi.session import (
+    GenerationResult,
+    TextSession,
+    chat_prompt,
+    parse_stream_token_line,
+    parse_token_line,
+    validate_runtime_model_dir,
+)
 
 
 def test_parse_token_line() -> None:
@@ -61,3 +68,21 @@ def test_validate_runtime_model_dir_accepts_runtime_dir(tmp_path: Path) -> None:
     (model / "minimind_runtime_config.txt").write_text("hidden_size=4\n")
     (model / "weights.bin").write_bytes(b"MMRTW001")
     validate_runtime_model_dir(model)
+
+
+def test_parse_stream_token_line() -> None:
+    assert parse_stream_token_line("token: 42") == 42
+    with pytest.raises(ValueError):
+        parse_stream_token_line("generated_tokens: 42")
+    with pytest.raises(ValueError):
+        parse_stream_token_line("token: 1 2")
+
+
+def test_text_session_stream_matches_blocking_toy_generation() -> None:
+    root = Path(__file__).resolve().parents[2]
+    session = TextSession(root / "build" / "minimind_generate", None)
+    streamed = list(session.stream_generate_result("hi", 3))
+    blocking = session.generate_result("hi", 3)
+    assert streamed
+    assert streamed[-1].generated_tokens == blocking.generated_tokens
+    assert streamed[-1].prompt_tokens == blocking.prompt_tokens

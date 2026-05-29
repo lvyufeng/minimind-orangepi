@@ -104,7 +104,7 @@ By default, the Python wrapper applies the MiniMind chat markers. Use `--raw-pro
 
 ## Gradio text demo
 
-The Gradio demo is text-only. It does not support MiniMind-V image-text inference or MiniMind-O omni/audio inference.
+The Gradio demo is text-only and streams generated tokens into the output box. It does not support MiniMind-V image-text inference or MiniMind-O omni/audio inference.
 
 Install the optional demo dependency:
 
@@ -127,6 +127,18 @@ python3 src/python/tools/gradio_text_demo.py \
 ```
 
 If the runtime directory includes `tokenizer.json`, install `tokenizers` to show decoded text. If `--model` is provided, the demo validates that the directory contains `minimind_runtime_config.txt` and `weights.bin` instead of silently falling back to the toy model.
+
+The native CLI also has an opt-in streaming mode:
+
+```bash
+build/minimind_generate \
+  --model models/minimind-runtime \
+  --prompt "你好" \
+  --max-new-tokens 32 \
+  --stream
+```
+
+Without `--stream`, the CLI keeps the stable non-streaming output format for scripts.
 
 ## Benchmark text decode
 

@@ -24,6 +24,14 @@ def format_details(result, mode: str) -> str:
     return f"{mode}\nprompt_tokens: {prompt_tokens}\ngenerated_tokens: {generated_tokens}"
 
 
+def output_text(result) -> str:
+    if result.generated_text is not None:
+        return result.generated_text
+    if result.generated_tokens:
+        return "generated_tokens: " + " ".join(str(token) for token in result.generated_tokens)
+    return result.raw_output
+
+
 def generate_text(
     session: TextSession,
     mode: str,
@@ -31,19 +39,22 @@ def generate_text(
     max_new_tokens: int,
     raw_prompt: bool,
     open_thinking: bool,
-) -> tuple[str, str]:
+):
     if not prompt.strip():
-        return "Please enter a prompt.", mode
+        yield "Please enter a prompt.", mode
+        return
     try:
-        result = session.generate_result(prompt, int(max_new_tokens), raw_prompt, open_thinking)
+        yielded = False
+        for result in session.stream_generate_result(prompt, int(max_new_tokens), raw_prompt, open_thinking):
+            yielded = True
+            yield output_text(result), format_details(result, mode)
+        if not yielded:
+            yield "", mode
     except subprocess.CalledProcessError as exc:
-        error = exc.stderr.strip() or exc.stdout.strip() or str(exc)
-        return f"Runtime error:\n{error}", mode
+        error = exc.stderr.strip() or exc.output.strip() or str(exc)
+        yield f"Runtime error:\n{error}", mode
     except Exception as exc:
-        return f"Error: {exc}", mode
-
-    output = result.generated_text if result.generated_text is not None else result.raw_output
-    return output, format_details(result, mode)
+        yield f"Error: {exc}", mode
 
 
 def build_demo(

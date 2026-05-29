@@ -20,6 +20,15 @@ std::string arg_value(int argc, char** argv, const std::string& name, const std:
   return fallback;
 }
 
+bool has_arg(int argc, char** argv, const std::string& name) {
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int64_t int_arg_value(int argc, char** argv, const std::string& name, int64_t fallback) {
   const std::string value = arg_value(argc, argv, name, "");
   if (value.empty()) {
@@ -70,21 +79,33 @@ int main(int argc, char** argv) {
   const std::string explicit_tokens = arg_value(argc, argv, "--tokens", "");
   const std::string model_dir = arg_value(argc, argv, "--model", "");
   const int64_t max_new_tokens = int_arg_value(argc, argv, "--max-new-tokens", 8);
+  const bool stream = has_arg(argc, argv, "--stream");
 
   auto model = (!model_dir.empty() && minimind::model::has_runtime_language_model(model_dir))
                    ? minimind::model::load_runtime_language_model(model_dir)
                    : minimind::model::make_toy_language_model();
   const auto prompt_tokens = prompt_tokens_for_model(prompt, explicit_tokens, model);
-  const auto generated = model.generate(prompt_tokens, max_new_tokens);
-
   std::cout << "prompt_tokens:";
   for (int32_t token : prompt_tokens) {
     std::cout << ' ' << token;
   }
-  std::cout << "\ngenerated_tokens:";
+  std::cout << '\n';
+
+  std::vector<int32_t> generated;
+  if (stream) {
+    std::cout << std::flush;
+    model.generate_stream(prompt_tokens, max_new_tokens, [&generated](int32_t token) {
+      generated.push_back(token);
+      std::cout << "token: " << token << '\n' << std::flush;
+    });
+  } else {
+    generated = model.generate(prompt_tokens, max_new_tokens);
+  }
+
+  std::cout << "generated_tokens:";
   for (int32_t token : generated) {
     std::cout << ' ' << token;
   }
-  std::cout << '\n';
+  std::cout << '\n' << std::flush;
   return 0;
 }

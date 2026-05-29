@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 
 @dataclass(frozen=True)
@@ -36,11 +37,24 @@ def validate_runtime_model_dir(model: Path | None) -> None:
         raise ValueError(f"invalid MiniMind text runtime model directory {model}; missing: {', '.join(missing)}")
 
 
+def parse_token_values(value: str) -> list[int]:
+    return [int(part) for part in value.split()]
+
+
 def parse_token_line(output: str, label: str) -> list[int]:
     for line in output.splitlines():
         if line.startswith(label + ":"):
-            return [int(part) for part in line.split(":", 1)[1].split()]
+            return parse_token_values(line.split(":", 1)[1])
     raise ValueError(f"missing {label} in runtime output")
+
+
+def parse_stream_token_line(line: str) -> int:
+    if not line.startswith("token:"):
+        raise ValueError("missing token line")
+    values = parse_token_values(line.split(":", 1)[1])
+    if len(values) != 1:
+        raise ValueError("stream token line must contain exactly one token")
+    return values[0]
 
 
 class TextSession:
@@ -61,14 +75,17 @@ class TextSession:
             raise RuntimeError("tokenizer.json requires the tokenizers package") from exc
         return Tokenizer.from_file(str(tokenizer_path))
 
-    def generate_result(
+    def _build_generate_command(
         self,
         prompt: str,
-        max_new_tokens: int = 8,
-        raw_prompt: bool = False,
-        open_thinking: bool = False,
-    ) -> GenerationResult:
+        max_new_tokens: int,
+        raw_prompt: bool,
+        open_thinking: bool,
+        stream: bool,
+    ):
         cmd = [str(self.executable), "--max-new-tokens", str(max_new_tokens)]
+        if stream:
+            cmd.append("--stream")
         if self.model is not None:
             cmd.extend(["--model", str(self.model)])
         tokenizer = self._load_tokenizer()
@@ -78,6 +95,31 @@ class TextSession:
             formatted_prompt = prompt if raw_prompt else chat_prompt(prompt, open_thinking)
             token_ids = tokenizer.encode(formatted_prompt).ids
             cmd.extend(["--tokens", ",".join(str(token) for token in token_ids)])
+        return cmd, tokenizer
+
+    def _result_from_tokens(
+        self,
+        raw_output: str,
+        prompt_tokens: list[int],
+        generated_tokens: list[int],
+        tokenizer,
+    ) -> GenerationResult:
+        generated_text = tokenizer.decode(generated_tokens) if tokenizer is not None else None
+        return GenerationResult(
+            raw_output=raw_output,
+            prompt_tokens=list(prompt_tokens),
+            generated_tokens=list(generated_tokens),
+            generated_text=generated_text,
+        )
+
+    def generate_result(
+        self,
+        prompt: str,
+        max_new_tokens: int = 8,
+        raw_prompt: bool = False,
+        open_thinking: bool = False,
+    ) -> GenerationResult:
+        cmd, tokenizer = self._build_generate_command(prompt, max_new_tokens, raw_prompt, open_thinking, False)
         result = subprocess.run(
             cmd,
             check=True,
@@ -86,13 +128,47 @@ class TextSession:
         )
         prompt_tokens = parse_token_line(result.stdout, "prompt_tokens")
         generated_tokens = parse_token_line(result.stdout, "generated_tokens")
-        generated_text = tokenizer.decode(generated_tokens) if tokenizer is not None else None
-        return GenerationResult(
-            raw_output=result.stdout,
-            prompt_tokens=prompt_tokens,
-            generated_tokens=generated_tokens,
-            generated_text=generated_text,
+        return self._result_from_tokens(result.stdout, prompt_tokens, generated_tokens, tokenizer)
+
+    def stream_generate_result(
+        self,
+        prompt: str,
+        max_new_tokens: int = 8,
+        raw_prompt: bool = False,
+        open_thinking: bool = False,
+    ) -> Iterator[GenerationResult]:
+        cmd, tokenizer = self._build_generate_command(prompt, max_new_tokens, raw_prompt, open_thinking, True)
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
         )
+        assert process.stdout is not None
+        raw_lines: list[str] = []
+        prompt_tokens: list[int] = []
+        generated_tokens: list[int] = []
+        try:
+            for line in process.stdout:
+                raw_lines.append(line)
+                stripped = line.strip()
+                if stripped.startswith("prompt_tokens:"):
+                    prompt_tokens = parse_token_values(stripped.split(":", 1)[1])
+                elif stripped.startswith("token:"):
+                    generated_tokens.append(parse_stream_token_line(stripped))
+                    yield self._result_from_tokens("".join(raw_lines), prompt_tokens, generated_tokens, tokenizer)
+                elif stripped.startswith("generated_tokens:"):
+                    generated_tokens = parse_token_values(stripped.split(":", 1)[1])
+                    yield self._result_from_tokens("".join(raw_lines), prompt_tokens, generated_tokens, tokenizer)
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            return_code = process.wait()
+        except Exception:
+            process.kill()
+            process.wait()
+            raise
+        if return_code != 0:
+            raise subprocess.CalledProcessError(return_code, cmd, output="".join(raw_lines), stderr=stderr)
 
     def generate(
         self,

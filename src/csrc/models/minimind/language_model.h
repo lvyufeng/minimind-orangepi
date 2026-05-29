@@ -3,6 +3,7 @@
 #include "decoder_layer.h"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace minimind::model {
@@ -27,6 +28,9 @@ class LanguageModel {
   DecoderState make_state() const;
   std::vector<float> forward_token(int32_t token, DecoderState& state) const;
   int32_t forward_next_token(int32_t token, DecoderState& state) const;
+  void generate_stream(const std::vector<int32_t>& prompt_tokens,
+                       int64_t max_new_tokens,
+                       const std::function<void(int32_t)>& on_token) const;
   std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                 int64_t max_new_tokens) const;
 

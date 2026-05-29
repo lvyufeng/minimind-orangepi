@@ -171,8 +171,9 @@ int32_t LanguageModel::forward_next_token(int32_t token, DecoderState& state) co
   return argmax_token(matvec(weights_.lm_head, config_.vocab_size, config_.hidden_size, hidden));
 }
 
-std::vector<int32_t> LanguageModel::generate(const std::vector<int32_t>& prompt_tokens,
-                                             int64_t max_new_tokens) const {
+void LanguageModel::generate_stream(const std::vector<int32_t>& prompt_tokens,
+                                    int64_t max_new_tokens,
+                                    const std::function<void(int32_t)>& on_token) const {
   if (prompt_tokens.empty()) {
     throw std::invalid_argument("prompt_tokens cannot be empty");
   }
@@ -186,15 +187,22 @@ std::vector<int32_t> LanguageModel::generate(const std::vector<int32_t>& prompt_
     next = forward_next_token(token, state);
   }
 
-  std::vector<int32_t> generated;
-  generated.reserve(static_cast<std::size_t>(max_new_tokens));
   for (int64_t i = 0; i < max_new_tokens; ++i) {
-    generated.push_back(next);
+    on_token(next);
     if (next == config_.eos_token_id || i + 1 == max_new_tokens) {
       break;
     }
     next = forward_next_token(next, state);
   }
+}
+
+std::vector<int32_t> LanguageModel::generate(const std::vector<int32_t>& prompt_tokens,
+                                             int64_t max_new_tokens) const {
+  std::vector<int32_t> generated;
+  generated.reserve(static_cast<std::size_t>(std::max<int64_t>(max_new_tokens, 0)));
+  generate_stream(prompt_tokens, max_new_tokens, [&generated](int32_t token) {
+    generated.push_back(token);
+  });
   return generated;
 }
 
