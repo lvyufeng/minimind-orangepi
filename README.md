@@ -21,18 +21,6 @@ Current status: the text MiniMind LLM path is the only end-to-end runnable path.
 - Fully fused device-resident decoder layers.
 - Stable long-context 20 TPS decode. Short decode is close, but longer decode still drops because the current runtime still has host/device activation round trips between layer operations.
 
-## Repository layout
-
-```text
-bench/                  Decode benchmark tools
-scripts/                Build and Ascend environment helpers
-src/csrc/               C++ runtime, model code, tools, and custom-op wrappers
-src/python/             Python export and generation helpers
-tests/                  Unit and integration tests
-models/                 Local model directories, ignored by git
-custom_opp_install/     Local custom OPP install output, ignored by git
-```
-
 ## Requirements
 
 - Linux on Orange Pi / Ascend 310B or a CANN-capable development environment.
