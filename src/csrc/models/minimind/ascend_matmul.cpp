@@ -237,8 +237,11 @@ const CachedMatrix& cached_matrix(const std::vector<float>& matrix, int64_t rows
   }
 
   std::vector<uint16_t> matrix_half(static_cast<std::size_t>(rows * cols));
-  for (int64_t i = 0; i < rows * cols; ++i) {
-    matrix_half[static_cast<std::size_t>(i)] = float_to_half(matrix[static_cast<std::size_t>(i)]);
+  for (int64_t row = 0; row < rows; ++row) {
+    for (int64_t col = 0; col < cols; ++col) {
+      matrix_half[static_cast<std::size_t>(col * rows + row)] =
+          float_to_half(matrix[static_cast<std::size_t>(row * cols + col)]);
+    }
   }
 
   CachedMatrix cached;
@@ -288,14 +291,14 @@ std::vector<float> cube_matvec(const std::vector<float>& matrix,
                         ACL_MEMCPY_HOST_TO_DEVICE),
             "aclrtMemcpy input H2D failed");
 
-  const int64_t matrix_dims[2] = {rows, cols};
-  const int64_t input_dims[2] = {cols, 1};
-  const int64_t out_dims[2] = {rows, 1};
-  const int64_t matrix_strides[2] = {cols, 1};
-  const int64_t input_strides[2] = {1, 1};
-  const int64_t out_strides[2] = {1, 1};
-  TensorHandle lhs(matrix_dims, matrix_strides, 2, weight.device.data());
-  TensorHandle rhs(input_dims, input_strides, 2, input_device.data());
+  const int64_t input_dims[2] = {1, cols};
+  const int64_t matrix_dims[2] = {cols, rows};
+  const int64_t out_dims[2] = {1, rows};
+  const int64_t input_strides[2] = {cols, 1};
+  const int64_t matrix_strides[2] = {rows, 1};
+  const int64_t out_strides[2] = {rows, 1};
+  TensorHandle lhs(input_dims, input_strides, 2, input_device.data());
+  TensorHandle rhs(matrix_dims, matrix_strides, 2, weight.device.data());
   TensorHandle out(out_dims, out_strides, 2, output_device.data());
 
   uint64_t workspace_size = 0;
