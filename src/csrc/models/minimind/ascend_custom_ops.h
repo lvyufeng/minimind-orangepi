@@ -7,6 +7,9 @@ namespace minimind::model {
 
 bool custom_ops_available();
 
+std::vector<float> custom_add(const std::vector<float>& lhs,
+                              const std::vector<float>& rhs);
+
 std::vector<float> custom_rms_norm(const std::vector<float>& input,
                                    const std::vector<float>& weight,
                                    float eps);

@@ -17,6 +17,18 @@ int main() {
     return 0;
   }
 
+  std::vector<float> add_lhs(128);
+  std::vector<float> add_rhs(128);
+  for (std::size_t i = 0; i < add_lhs.size(); ++i) {
+    add_lhs[i] = static_cast<float>(static_cast<int>(i % 17) - 8) * 0.03125F;
+    add_rhs[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.0625F;
+  }
+  const auto added = minimind::model::custom_add(add_lhs, add_rhs);
+  CHECK(added.size() == add_lhs.size());
+  for (std::size_t i = 0; i < added.size(); ++i) {
+    CHECK(std::fabs(added[i] - (add_lhs[i] + add_rhs[i])) < 5e-2F);
+  }
+
   std::vector<float> input(128);
   std::vector<float> weight(128);
   for (std::size_t i = 0; i < input.size(); ++i) {

@@ -11,6 +11,7 @@
 #if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
 #include <acl/acl.h>
 #include <aclnn/aclnn_base.h>
+#include <aclnn_mini_mind_add.h>
 #include <aclnn_mini_mind_attention.h>
 #include <aclnn_mini_mind_rms_norm.h>
 #include <aclnn_mini_mind_rope.h>
@@ -137,6 +138,40 @@ bool custom_ops_available() {
   return cube_matvec_available();
 #else
   return false;
+#endif
+}
+
+std::vector<float> custom_add(const std::vector<float>& lhs,
+                              const std::vector<float>& rhs) {
+#if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
+  if (lhs.size() != rhs.size()) {
+    throw std::invalid_argument("custom_add shape mismatch");
+  }
+  (void)runtime();
+
+  DeviceBuffer lhs_device = copy_half_to_device(lhs);
+  DeviceBuffer rhs_device = copy_half_to_device(rhs);
+  DeviceBuffer output_device(lhs.size() * sizeof(uint16_t));
+
+  const int64_t dims[1] = {static_cast<int64_t>(lhs.size())};
+  const int64_t strides[1] = {1};
+  TensorHandle lhs_tensor(dims, strides, 1, lhs_device.data());
+  TensorHandle rhs_tensor(dims, strides, 1, rhs_device.data());
+  TensorHandle out(dims, strides, 1, output_device.data());
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* executor = nullptr;
+  check_aclnn(aclnnMiniMindAddGetWorkspaceSize(lhs_tensor.get(), rhs_tensor.get(), out.get(), &workspace_size, &executor),
+              "aclnnMiniMindAddGetWorkspaceSize failed");
+  DeviceBuffer workspace(workspace_size);
+  check_aclnn(aclnnMiniMindAdd(workspace.data(), workspace_size, executor, runtime().stream()),
+              "aclnnMiniMindAdd failed");
+  check_acl(aclrtSynchronizeStream(runtime().stream()), "aclrtSynchronizeStream failed");
+  return copy_half_to_host(output_device, lhs.size());
+#else
+  (void)lhs;
+  (void)rhs;
+  throw std::runtime_error("custom_add is unavailable");
 #endif
 }
 

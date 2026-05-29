@@ -173,9 +173,22 @@ class MiniMindAttention : public ops::OpDef {
   }
 };
 
+class MiniMindAdd : public ops::OpDef {
+ public:
+  explicit MiniMindAdd(const char* name) : OpDef(name) {
+    Input("lhs").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    Input("rhs").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    Output("out").ParamType(ops::REQUIRED).DataType({ge::DT_FLOAT16}).Format({ge::FORMAT_ND});
+    SetInferShape(infer_like_input0);
+    SetInferDataType(infer_dtype_like_input0);
+    AICore().SetTiling(tile_vector_op).AddConfig("ascend310b");
+  }
+};
+
 OP_ADD(MiniMindRmsNorm);
 OP_ADD(MiniMindSwiGlu);
 OP_ADD(MiniMindRope);
 OP_ADD(MiniMindAttention);
+OP_ADD(MiniMindAdd);
 
 }  // namespace
