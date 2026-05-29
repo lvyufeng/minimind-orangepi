@@ -17,6 +17,10 @@ void require_size(const std::vector<float>& values, int64_t expected, const char
   }
 }
 
+bool use_host_vector_custom_ops() {
+  return false;
+}
+
 std::vector<float> cpu_rms_norm(const std::vector<float>& input,
                                 const std::vector<float>& weight,
                                 float eps) {
@@ -36,7 +40,7 @@ std::vector<float> rms_norm(const std::vector<float>& input,
                             const std::vector<float>& weight,
                             float eps) {
   require_size(weight, static_cast<int64_t>(input.size()), "rms_norm weight");
-  if (custom_ops_available() && input.size() >= 128) {
+  if (use_host_vector_custom_ops() && custom_ops_available() && input.size() >= 128) {
     try {
       return custom_rms_norm(input, weight, eps);
     } catch (const std::exception&) {
@@ -74,7 +78,7 @@ std::vector<float> matvec(const std::vector<float>& matrix,
 
 void apply_rope(std::vector<float>& values, int64_t heads, int64_t head_dim, int64_t position, float theta) {
   require_size(values, heads * head_dim, "rope input");
-  if (custom_ops_available() && values.size() >= 128) {
+  if (use_host_vector_custom_ops() && custom_ops_available() && values.size() >= 128) {
     try {
       values = custom_rope(values, heads, head_dim, position, theta);
       return;
@@ -102,7 +106,7 @@ float silu(float value) {
 
 std::vector<float> swiglu(const std::vector<float>& gate, const std::vector<float>& up) {
   require_size(up, static_cast<int64_t>(gate.size()), "swiglu up");
-  if (custom_ops_available() && gate.size() >= 128) {
+  if (use_host_vector_custom_ops() && custom_ops_available() && gate.size() >= 128) {
     try {
       return custom_swiglu(gate, up);
     } catch (const std::exception&) {
