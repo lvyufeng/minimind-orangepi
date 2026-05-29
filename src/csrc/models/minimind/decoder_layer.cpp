@@ -118,14 +118,17 @@ std::vector<float> swiglu(const std::vector<float>& gate, const std::vector<floa
 
 std::vector<float> attention_step(const MiniMindConfig& config,
                                   const std::vector<float>& query,
-                                  const LayerKvCache& cache) {
+                                  const std::vector<float>& key,
+                                  const std::vector<float>& value,
+                                  LayerKvCache& cache) {
   const int64_t q_heads = config.num_attention_heads;
   const int64_t kv_heads = config.num_key_value_heads;
   const int64_t head_dim = config.head_dim;
   const int64_t kv_repeat = q_heads / kv_heads;
   if (custom_ops_available() && cache.tokens > 0 && cache.tokens <= 2048 && head_dim <= 128) {
     try {
-      return custom_attention(query, cache.keys, cache.values, cache.tokens, q_heads, kv_heads, head_dim);
+      return custom_attention_cached(query, key, value, cache.custom_attention_cache, cache.tokens, q_heads, kv_heads,
+                                     head_dim);
     } catch (const std::exception&) {
     }
   }
@@ -217,7 +220,7 @@ std::vector<float> run_dense_decoder_layer(
   cache.values.insert(cache.values.end(), value.begin(), value.end());
   cache.tokens += 1;
 
-  auto context = attention_step(config, query, cache);
+  auto context = attention_step(config, query, key, value, cache);
   auto attention_out = matvec(weights.o_proj, config.hidden_size, q_size, context);
 
   std::vector<float> residual(hidden.size());

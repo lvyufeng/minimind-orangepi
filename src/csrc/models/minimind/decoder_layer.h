@@ -1,8 +1,10 @@
 #pragma once
 
+#include "ascend_custom_ops.h"
 #include "config.h"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace minimind::model {
@@ -35,6 +37,7 @@ struct DenseLayerWeights {
 struct LayerKvCache {
   std::vector<float> keys;
   std::vector<float> values;
+  std::shared_ptr<CustomAttentionCache> custom_attention_cache;
   int64_t tokens = 0;
 };
 

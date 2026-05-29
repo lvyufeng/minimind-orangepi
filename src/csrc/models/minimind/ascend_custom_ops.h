@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace minimind::model {
+
+struct CustomAttentionCache;
 
 bool custom_ops_available();
 
@@ -30,5 +33,14 @@ std::vector<float> custom_attention(const std::vector<float>& query,
                                     int64_t q_heads,
                                     int64_t kv_heads,
                                     int64_t head_dim);
+
+std::vector<float> custom_attention_cached(const std::vector<float>& query,
+                                           const std::vector<float>& keys,
+                                           const std::vector<float>& values,
+                                           std::shared_ptr<CustomAttentionCache>& cache,
+                                           int64_t tokens,
+                                           int64_t q_heads,
+                                           int64_t kv_heads,
+                                           int64_t head_dim);
 
 }  // namespace minimind::model

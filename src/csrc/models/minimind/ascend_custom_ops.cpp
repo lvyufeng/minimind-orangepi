@@ -1,9 +1,11 @@
 #include "ascend_custom_ops.h"
 #include "ascend_matmul.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -104,16 +106,48 @@ class TensorHandle {
   aclTensor* tensor_ = nullptr;
 };
 
-DeviceBuffer copy_half_to_device(const std::vector<float>& values) {
+std::vector<uint16_t> to_half_vector(const std::vector<float>& values) {
   std::vector<uint16_t> half_values(values.size());
   for (std::size_t i = 0; i < values.size(); ++i) {
     half_values[i] = float_to_half(values[i]);
   }
+  return half_values;
+}
+
+DeviceBuffer copy_half_to_device(const std::vector<float>& values) {
+  const auto half_values = to_half_vector(values);
 
   DeviceBuffer device(half_values.size() * sizeof(uint16_t));
   check_acl(aclrtMemcpy(device.data(), device.bytes(), half_values.data(), device.bytes(), ACL_MEMCPY_HOST_TO_DEVICE),
             "aclrtMemcpy H2D failed");
   return device;
+}
+
+}  // namespace
+
+struct CustomAttentionCache {
+  int64_t capacity_tokens = 0;
+  int64_t kv_heads = 0;
+  int64_t head_dim = 0;
+  DeviceBuffer keys;
+  DeviceBuffer values;
+};
+
+namespace {
+
+void ensure_attention_cache(CustomAttentionCache& cache, int64_t tokens, int64_t kv_heads, int64_t head_dim) {
+  if (tokens <= 0 || kv_heads <= 0 || head_dim <= 0) {
+    throw std::invalid_argument("invalid attention cache shape");
+  }
+  if (cache.capacity_tokens >= tokens && cache.kv_heads == kv_heads && cache.head_dim == head_dim) {
+    return;
+  }
+  cache.capacity_tokens = std::max<int64_t>(tokens, 2048);
+  cache.kv_heads = kv_heads;
+  cache.head_dim = head_dim;
+  const std::size_t bytes = static_cast<std::size_t>(cache.capacity_tokens * kv_heads * head_dim) * sizeof(uint16_t);
+  cache.keys.reset(bytes);
+  cache.values.reset(bytes);
 }
 
 std::vector<float> copy_half_to_host(const DeviceBuffer& device, std::size_t values) {
@@ -128,6 +162,7 @@ std::vector<float> copy_half_to_host(const DeviceBuffer& device, std::size_t val
   }
   return output;
 }
+
 
 #endif
 
@@ -350,6 +385,79 @@ std::vector<float> custom_attention(const std::vector<float>& query,
   (void)kv_heads;
   (void)head_dim;
   throw std::runtime_error("custom_attention is unavailable");
+#endif
+}
+
+std::vector<float> custom_attention_cached(const std::vector<float>& query,
+                                           const std::vector<float>& key,
+                                           const std::vector<float>& value,
+                                           std::shared_ptr<CustomAttentionCache>& cache,
+                                           int64_t tokens,
+                                           int64_t q_heads,
+                                           int64_t kv_heads,
+                                           int64_t head_dim) {
+#if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
+  if (tokens <= 0 || q_heads <= 0 || kv_heads <= 0 || head_dim <= 0 || q_heads % kv_heads != 0) {
+    throw std::invalid_argument("custom_attention_cached invalid shape");
+  }
+  if (head_dim > 128 || tokens > 2048 || q_heads > 255 || kv_heads > 255 ||
+      static_cast<int64_t>(query.size()) != q_heads * head_dim ||
+      static_cast<int64_t>(key.size()) != kv_heads * head_dim ||
+      static_cast<int64_t>(value.size()) != kv_heads * head_dim) {
+    throw std::invalid_argument("custom_attention_cached shape mismatch");
+  }
+  (void)runtime();
+
+  if (!cache || cache->kv_heads != kv_heads || cache->head_dim != head_dim || cache->capacity_tokens < tokens) {
+    cache = std::make_shared<CustomAttentionCache>();
+    ensure_attention_cache(*cache, tokens, kv_heads, head_dim);
+  }
+  ensure_attention_cache(*cache, tokens, kv_heads, head_dim);
+
+  const int64_t kv_size = kv_heads * head_dim;
+  const auto key_half = to_half_vector(key);
+  const auto value_half = to_half_vector(value);
+  const std::size_t bytes = key_half.size() * sizeof(uint16_t);
+  const std::size_t offset = static_cast<std::size_t>((tokens - 1) * kv_size) * sizeof(uint16_t);
+  auto* key_target = static_cast<unsigned char*>(cache->keys.data()) + offset;
+  auto* value_target = static_cast<unsigned char*>(cache->values.data()) + offset;
+  check_acl(aclrtMemcpy(key_target, cache->keys.bytes() - offset, key_half.data(), bytes, ACL_MEMCPY_HOST_TO_DEVICE),
+            "aclrtMemcpy cached key H2D failed");
+  check_acl(aclrtMemcpy(value_target, cache->values.bytes() - offset, value_half.data(), bytes, ACL_MEMCPY_HOST_TO_DEVICE),
+            "aclrtMemcpy cached value H2D failed");
+
+  DeviceBuffer query_device = copy_half_to_device(query);
+  DeviceBuffer output_device(query.size() * sizeof(uint16_t));
+
+  const int64_t query_dims[2] = {q_heads, head_dim};
+  const int64_t query_strides[2] = {head_dim, 1};
+  const int64_t cache_dims[3] = {tokens, kv_heads, head_dim};
+  const int64_t cache_strides[3] = {kv_heads * head_dim, head_dim, 1};
+  TensorHandle query_tensor(query_dims, query_strides, 2, query_device.data());
+  TensorHandle keys_tensor(cache_dims, cache_strides, 3, cache->keys.data());
+  TensorHandle values_tensor(cache_dims, cache_strides, 3, cache->values.data());
+  TensorHandle out(query_dims, query_strides, 2, output_device.data());
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* executor = nullptr;
+  check_aclnn(aclnnMiniMindAttentionGetWorkspaceSize(query_tensor.get(), keys_tensor.get(), values_tensor.get(), out.get(),
+                                                     &workspace_size, &executor),
+              "aclnnMiniMindAttentionGetWorkspaceSize failed");
+  DeviceBuffer workspace(workspace_size);
+  check_aclnn(aclnnMiniMindAttention(workspace.data(), workspace_size, executor, runtime().stream()),
+              "aclnnMiniMindAttention failed");
+  check_acl(aclrtSynchronizeStream(runtime().stream()), "aclrtSynchronizeStream failed");
+  return copy_half_to_host(output_device, query.size());
+#else
+  (void)query;
+  (void)key;
+  (void)value;
+  (void)cache;
+  (void)tokens;
+  (void)q_heads;
+  (void)kv_heads;
+  (void)head_dim;
+  throw std::runtime_error("custom_attention_cached is unavailable");
 #endif
 }
 
