@@ -75,6 +75,27 @@ std::vector<int32_t> decode_fixed_steps(const minimind::model::LanguageModel& mo
   return generated;
 }
 
+double timed_decode_fixed_steps(const minimind::model::LanguageModel& model,
+                                const std::vector<int32_t>& input_tokens,
+                                int64_t decode_tokens,
+                                std::vector<int32_t>& generated) {
+  auto state = model.make_state();
+  int32_t next = 0;
+  for (int32_t token : input_tokens) {
+    next = model.forward_next_token(token, state);
+  }
+
+  generated.clear();
+  generated.reserve(static_cast<std::size_t>(decode_tokens));
+  const auto start = std::chrono::steady_clock::now();
+  for (int64_t i = 0; i < decode_tokens; ++i) {
+    generated.push_back(next);
+    next = model.forward_next_token(next, state);
+  }
+  const auto end = std::chrono::steady_clock::now();
+  return std::chrono::duration<double>(end - start).count();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -93,10 +114,8 @@ int main(int argc, char** argv) {
     (void)decode_fixed_steps(model, tokens, decode_tokens);
   }
 
-  const auto start = std::chrono::steady_clock::now();
-  const auto generated = decode_fixed_steps(model, tokens, decode_tokens);
-  const auto end = std::chrono::steady_clock::now();
-  const double seconds = std::chrono::duration<double>(end - start).count();
+  std::vector<int32_t> generated;
+  const double seconds = timed_decode_fixed_steps(model, tokens, decode_tokens, generated);
   const double tokens_per_second = generated.empty() || seconds == 0.0
                                        ? 0.0
                                        : static_cast<double>(generated.size()) / seconds;
