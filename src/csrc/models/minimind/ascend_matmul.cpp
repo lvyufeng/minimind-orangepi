@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #if defined(MINIMIND_USE_ASCEND)
 #include <acl/acl.h>
@@ -135,6 +136,13 @@ class DeviceBuffer {
     bytes_ = bytes;
   }
 
+  void reserve(std::size_t bytes) {
+    if (bytes <= bytes_) {
+      return;
+    }
+    reset(bytes);
+  }
+
  private:
   void release() noexcept {
     if (data_ != nullptr) {
@@ -228,6 +236,21 @@ AscendRuntime& runtime() {
 
 namespace {
 
+struct MatvecScratch {
+  DeviceBuffer input_device;
+  DeviceBuffer output_device;
+  DeviceBuffer workspace;
+  DeviceBuffer token_device;
+  DeviceBuffer argmax_workspace;
+  std::vector<uint16_t> input_half;
+  std::vector<uint16_t> output_half;
+};
+
+MatvecScratch& matvec_scratch() {
+  thread_local MatvecScratch scratch;
+  return scratch;
+}
+
 const CachedMatrix& cached_matrix(const std::vector<float>& matrix, int64_t rows, int64_t cols) {
   static std::mutex mutex;
   static std::unordered_map<const float*, CachedMatrix> cache;
@@ -285,16 +308,17 @@ std::vector<float> cube_matvec(const std::vector<float>& matrix,
   AscendRuntime& rt = runtime();
   const CachedMatrix& weight = cached_matrix(matrix, rows, cols);
 
-  std::vector<uint16_t> input_half(static_cast<std::size_t>(cols));
+  auto& scratch = matvec_scratch();
+  scratch.input_half.resize(static_cast<std::size_t>(cols));
   for (int64_t i = 0; i < cols; ++i) {
-    input_half[static_cast<std::size_t>(i)] = float_to_half(input[static_cast<std::size_t>(i)]);
+    scratch.input_half[static_cast<std::size_t>(i)] = float_to_half(input[static_cast<std::size_t>(i)]);
   }
-  std::vector<uint16_t> output_half(static_cast<std::size_t>(rows));
+  scratch.output_half.resize(static_cast<std::size_t>(rows));
 
-  DeviceBuffer input_device(input_half.size() * sizeof(uint16_t));
-  DeviceBuffer output_device(output_half.size() * sizeof(uint16_t));
-  check_acl(aclrtMemcpy(input_device.data(), input_device.bytes(), input_half.data(), input_device.bytes(),
-                        ACL_MEMCPY_HOST_TO_DEVICE),
+  scratch.input_device.reserve(scratch.input_half.size() * sizeof(uint16_t));
+  scratch.output_device.reserve(scratch.output_half.size() * sizeof(uint16_t));
+  check_acl(aclrtMemcpy(scratch.input_device.data(), scratch.input_half.size() * sizeof(uint16_t), scratch.input_half.data(),
+                        scratch.input_half.size() * sizeof(uint16_t), ACL_MEMCPY_HOST_TO_DEVICE),
             "aclrtMemcpy input H2D failed");
 
   const int64_t input_dims[2] = {1, cols};
@@ -303,25 +327,26 @@ std::vector<float> cube_matvec(const std::vector<float>& matrix,
   const int64_t input_strides[2] = {cols, 1};
   const int64_t matrix_strides[2] = {rows, 1};
   const int64_t out_strides[2] = {rows, 1};
-  TensorHandle lhs(input_dims, input_strides, 2, input_device.data());
+  TensorHandle lhs(input_dims, input_strides, 2, scratch.input_device.data());
   TensorHandle rhs(matrix_dims, matrix_strides, 2, weight.device.data());
-  TensorHandle out(out_dims, out_strides, 2, output_device.data());
+  TensorHandle out(out_dims, out_strides, 2, scratch.output_device.data());
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
   constexpr int8_t cube_math_type = 0;
   check_aclnn(aclnnMmGetWorkspaceSize(lhs.get(), rhs.get(), out.get(), cube_math_type, &workspace_size, &executor),
               "aclnnMmGetWorkspaceSize failed");
-  DeviceBuffer workspace(workspace_size);
-  check_aclnn(aclnnMm(workspace.data(), workspace_size, executor, rt.stream()), "aclnnMm failed");
+  scratch.workspace.reserve(workspace_size);
+  check_aclnn(aclnnMm(scratch.workspace.data(), workspace_size, executor, rt.stream()), "aclnnMm failed");
   check_acl(aclrtSynchronizeStream(rt.stream()), "aclrtSynchronizeStream failed");
-  check_acl(aclrtMemcpy(output_half.data(), output_half.size() * sizeof(uint16_t), output_device.data(),
-                        output_device.bytes(), ACL_MEMCPY_DEVICE_TO_HOST),
+  check_acl(aclrtMemcpy(scratch.output_half.data(), scratch.output_half.size() * sizeof(uint16_t),
+                        scratch.output_device.data(), scratch.output_half.size() * sizeof(uint16_t),
+                        ACL_MEMCPY_DEVICE_TO_HOST),
             "aclrtMemcpy output D2H failed");
 
   std::vector<float> output(static_cast<std::size_t>(rows));
   for (int64_t i = 0; i < rows; ++i) {
-    output[static_cast<std::size_t>(i)] = half_to_float(output_half[static_cast<std::size_t>(i)]);
+    output[static_cast<std::size_t>(i)] = half_to_float(scratch.output_half[static_cast<std::size_t>(i)]);
   }
   return output;
 #else
@@ -341,16 +366,17 @@ int32_t cube_matvec_argmax(const std::vector<float>& matrix,
   AscendRuntime& rt = runtime();
   const CachedMatrix& weight = cached_matrix(matrix, rows, cols);
 
-  std::vector<uint16_t> input_half(static_cast<std::size_t>(cols));
+  auto& scratch = matvec_scratch();
+  scratch.input_half.resize(static_cast<std::size_t>(cols));
   for (int64_t i = 0; i < cols; ++i) {
-    input_half[static_cast<std::size_t>(i)] = float_to_half(input[static_cast<std::size_t>(i)]);
+    scratch.input_half[static_cast<std::size_t>(i)] = float_to_half(input[static_cast<std::size_t>(i)]);
   }
 
-  DeviceBuffer input_device(input_half.size() * sizeof(uint16_t));
-  DeviceBuffer output_device(static_cast<std::size_t>(rows) * sizeof(uint16_t));
-  DeviceBuffer token_device(sizeof(int32_t));
-  check_acl(aclrtMemcpy(input_device.data(), input_device.bytes(), input_half.data(), input_device.bytes(),
-                        ACL_MEMCPY_HOST_TO_DEVICE),
+  scratch.input_device.reserve(scratch.input_half.size() * sizeof(uint16_t));
+  scratch.output_device.reserve(static_cast<std::size_t>(rows) * sizeof(uint16_t));
+  scratch.token_device.reserve(sizeof(int32_t));
+  check_acl(aclrtMemcpy(scratch.input_device.data(), scratch.input_half.size() * sizeof(uint16_t), scratch.input_half.data(),
+                        scratch.input_half.size() * sizeof(uint16_t), ACL_MEMCPY_HOST_TO_DEVICE),
             "aclrtMemcpy input H2D failed");
 
   const int64_t input_dims[2] = {1, cols};
@@ -359,31 +385,31 @@ int32_t cube_matvec_argmax(const std::vector<float>& matrix,
   const int64_t input_strides[2] = {cols, 1};
   const int64_t matrix_strides[2] = {rows, 1};
   const int64_t out_strides[2] = {rows, 1};
-  TensorHandle lhs(input_dims, input_strides, 2, input_device.data());
+  TensorHandle lhs(input_dims, input_strides, 2, scratch.input_device.data());
   TensorHandle rhs(matrix_dims, matrix_strides, 2, weight.device.data());
-  TensorHandle out(out_dims, out_strides, 2, output_device.data());
+  TensorHandle out(out_dims, out_strides, 2, scratch.output_device.data());
 
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
   constexpr int8_t cube_math_type = 0;
   check_aclnn(aclnnMmGetWorkspaceSize(lhs.get(), rhs.get(), out.get(), cube_math_type, &workspace_size, &executor),
               "aclnnMmGetWorkspaceSize failed");
-  DeviceBuffer workspace(workspace_size);
-  check_aclnn(aclnnMm(workspace.data(), workspace_size, executor, rt.stream()), "aclnnMm failed");
+  scratch.workspace.reserve(workspace_size);
+  check_aclnn(aclnnMm(scratch.workspace.data(), workspace_size, executor, rt.stream()), "aclnnMm failed");
 
   const int64_t token_dims[1] = {1};
   const int64_t token_strides[1] = {1};
-  TensorHandle token_tensor(token_dims, token_strides, 1, token_device.data(), ACL_INT32);
+  TensorHandle token_tensor(token_dims, token_strides, 1, scratch.token_device.data(), ACL_INT32);
   workspace_size = 0;
   executor = nullptr;
   check_aclnn(aclnnArgMaxGetWorkspaceSize(out.get(), 1, false, token_tensor.get(), &workspace_size, &executor),
               "aclnnArgMaxGetWorkspaceSize failed");
-  DeviceBuffer argmax_workspace(workspace_size);
-  check_aclnn(aclnnArgMax(argmax_workspace.data(), workspace_size, executor, rt.stream()), "aclnnArgMax failed");
+  scratch.argmax_workspace.reserve(workspace_size);
+  check_aclnn(aclnnArgMax(scratch.argmax_workspace.data(), workspace_size, executor, rt.stream()), "aclnnArgMax failed");
   check_acl(aclrtSynchronizeStream(rt.stream()), "aclrtSynchronizeStream failed");
 
   int32_t token = 0;
-  check_acl(aclrtMemcpy(&token, sizeof(token), token_device.data(), token_device.bytes(), ACL_MEMCPY_DEVICE_TO_HOST),
+  check_acl(aclrtMemcpy(&token, sizeof(token), scratch.token_device.data(), sizeof(token), ACL_MEMCPY_DEVICE_TO_HOST),
             "aclrtMemcpy token D2H failed");
   return token;
 #else

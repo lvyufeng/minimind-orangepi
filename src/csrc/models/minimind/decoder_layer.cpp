@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace minimind::model {
 
@@ -21,18 +23,23 @@ bool use_host_vector_custom_ops() {
   return false;
 }
 
+void rms_norm_inplace(float* values, const std::vector<float>& weight, int64_t size, float eps) {
+  require_size(weight, size, "rms_norm weight");
+  float sum = 0.0F;
+  for (int64_t i = 0; i < size; ++i) {
+    sum += values[static_cast<std::size_t>(i)] * values[static_cast<std::size_t>(i)];
+  }
+  const float scale = 1.0F / std::sqrt(sum / static_cast<float>(size) + eps);
+  for (int64_t i = 0; i < size; ++i) {
+    values[static_cast<std::size_t>(i)] *= scale * weight[static_cast<std::size_t>(i)];
+  }
+}
+
 std::vector<float> cpu_rms_norm(const std::vector<float>& input,
                                 const std::vector<float>& weight,
                                 float eps) {
-  float sum = 0.0F;
-  for (float value : input) {
-    sum += value * value;
-  }
-  const float scale = 1.0F / std::sqrt(sum / static_cast<float>(input.size()) + eps);
-  std::vector<float> output(input.size());
-  for (std::size_t i = 0; i < input.size(); ++i) {
-    output[i] = input[i] * scale * weight[i];
-  }
+  std::vector<float> output = input;
+  rms_norm_inplace(output.data(), weight, static_cast<int64_t>(output.size()), eps);
   return output;
 }
 
@@ -76,7 +83,44 @@ std::vector<float> matvec(const std::vector<float>& matrix,
   return cpu_matvec(matrix, rows, cols, input);
 }
 
-void apply_rope(std::vector<float>& values, int64_t heads, int64_t head_dim, int64_t position, float theta) {
+struct RopeTables {
+  std::vector<float> cos;
+  std::vector<float> sin;
+};
+
+const RopeTables& rope_tables(int64_t max_position, int64_t head_dim, float theta) {
+  static int64_t cached_max_position = 0;
+  static int64_t cached_head_dim = 0;
+  static float cached_theta = 0.0F;
+  static RopeTables cached;
+  if (cached_max_position == max_position && cached_head_dim == head_dim && cached_theta == theta) {
+    return cached;
+  }
+
+  cached_max_position = max_position;
+  cached_head_dim = head_dim;
+  cached_theta = theta;
+  const int64_t half_dim = head_dim / 2;
+  cached.cos.resize(static_cast<std::size_t>(max_position * half_dim));
+  cached.sin.resize(static_cast<std::size_t>(max_position * half_dim));
+  for (int64_t position = 0; position < max_position; ++position) {
+    for (int64_t dim = 0; dim < half_dim; ++dim) {
+      const float inv_freq = 1.0F / std::pow(theta, static_cast<float>(dim * 2) / static_cast<float>(head_dim));
+      const float angle = static_cast<float>(position) * inv_freq;
+      const std::size_t index = static_cast<std::size_t>(position * half_dim + dim);
+      cached.cos[index] = std::cos(angle);
+      cached.sin[index] = std::sin(angle);
+    }
+  }
+  return cached;
+}
+
+void apply_rope(std::vector<float>& values,
+                int64_t heads,
+                int64_t head_dim,
+                int64_t position,
+                float theta,
+                int64_t max_position) {
   require_size(values, heads * head_dim, "rope input");
   if (use_host_vector_custom_ops() && custom_ops_available() && values.size() >= 128) {
     try {
@@ -85,17 +129,19 @@ void apply_rope(std::vector<float>& values, int64_t heads, int64_t head_dim, int
     } catch (const std::exception&) {
     }
   }
+
+  const int64_t half_dim = head_dim / 2;
+  const auto& tables = rope_tables(max_position, head_dim, theta);
+  const std::size_t table_base = static_cast<std::size_t>(position * half_dim);
   for (int64_t head = 0; head < heads; ++head) {
     float* base = values.data() + head * head_dim;
-    for (int64_t dim = 0; dim < head_dim / 2; ++dim) {
-      const float inv_freq = 1.0F / std::pow(theta, static_cast<float>(dim * 2) / static_cast<float>(head_dim));
-      const float angle = static_cast<float>(position) * inv_freq;
-      const float c = std::cos(angle);
-      const float s = std::sin(angle);
+    for (int64_t dim = 0; dim < half_dim; ++dim) {
+      const float c = tables.cos[table_base + static_cast<std::size_t>(dim)];
+      const float s = tables.sin[table_base + static_cast<std::size_t>(dim)];
       const float first = base[dim];
-      const float second = base[dim + head_dim / 2];
+      const float second = base[dim + half_dim];
       base[dim] = first * c - second * s;
-      base[dim + head_dim / 2] = second * c + first * s;
+      base[dim + half_dim] = second * c + first * s;
     }
   }
 }
@@ -116,6 +162,15 @@ std::vector<float> swiglu(const std::vector<float>& gate, const std::vector<floa
   std::vector<float> activated(gate.size());
   for (std::size_t i = 0; i < gate.size(); ++i) {
     activated[i] = silu(gate[i]) * up[i];
+  }
+  return activated;
+}
+
+std::vector<float> swiglu_from_gate_up(const std::vector<float>& gate_up) {
+  const std::size_t size = gate_up.size() / 2;
+  std::vector<float> activated(size);
+  for (std::size_t i = 0; i < size; ++i) {
+    activated[i] = silu(gate_up[i]) * gate_up[i + size];
   }
   return activated;
 }
@@ -205,20 +260,16 @@ std::vector<float> run_dense_decoder_layer(
   }
 
   for (int64_t head = 0; head < config.num_attention_heads; ++head) {
-    std::vector<float> slice(query.begin() + head * config.head_dim,
-                             query.begin() + (head + 1) * config.head_dim);
-    slice = rms_norm(slice, weights.q_norm, config.rms_norm_eps);
-    std::copy(slice.begin(), slice.end(), query.begin() + head * config.head_dim);
+    rms_norm_inplace(query.data() + head * config.head_dim, weights.q_norm, config.head_dim, config.rms_norm_eps);
   }
   for (int64_t head = 0; head < config.num_key_value_heads; ++head) {
-    std::vector<float> slice(key.begin() + head * config.head_dim,
-                             key.begin() + (head + 1) * config.head_dim);
-    slice = rms_norm(slice, weights.k_norm, config.rms_norm_eps);
-    std::copy(slice.begin(), slice.end(), key.begin() + head * config.head_dim);
+    rms_norm_inplace(key.data() + head * config.head_dim, weights.k_norm, config.head_dim, config.rms_norm_eps);
   }
 
-  apply_rope(query, config.num_attention_heads, config.head_dim, position, config.rope_theta);
-  apply_rope(key, config.num_key_value_heads, config.head_dim, position, config.rope_theta);
+  apply_rope(query, config.num_attention_heads, config.head_dim, position, config.rope_theta,
+             config.max_position_embeddings);
+  apply_rope(key, config.num_key_value_heads, config.head_dim, position, config.rope_theta,
+             config.max_position_embeddings);
 
   cache.keys.insert(cache.keys.end(), key.begin(), key.end());
   cache.values.insert(cache.values.end(), value.begin(), value.end());
@@ -243,30 +294,26 @@ std::vector<float> run_dense_decoder_layer(
     const int64_t expert_index = static_cast<int64_t>(
         std::distance(router.begin(), std::max_element(router.begin(), router.end())));
     const auto& expert = weights.experts[static_cast<std::size_t>(expert_index)];
-    std::vector<float> gate;
-    std::vector<float> up;
+    std::vector<float> activated;
     if (!expert.gate_up_proj.empty()) {
       const auto gate_up = matvec(expert.gate_up_proj, 2 * config.moe_intermediate_size, config.hidden_size, post_normed);
-      gate.assign(gate_up.begin(), gate_up.begin() + config.moe_intermediate_size);
-      up.assign(gate_up.begin() + config.moe_intermediate_size, gate_up.end());
+      activated = swiglu_from_gate_up(gate_up);
     } else {
-      gate = matvec(expert.gate_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
-      up = matvec(expert.up_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+      const auto gate = matvec(expert.gate_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+      const auto up = matvec(expert.up_proj, config.moe_intermediate_size, config.hidden_size, post_normed);
+      activated = swiglu(gate, up);
     }
-    const auto activated = swiglu(gate, up);
     mlp = matvec(expert.down_proj, config.hidden_size, config.moe_intermediate_size, activated);
   } else {
-    std::vector<float> gate;
-    std::vector<float> up;
+    std::vector<float> activated;
     if (!weights.gate_up_proj.empty()) {
       const auto gate_up = matvec(weights.gate_up_proj, 2 * config.intermediate_size, config.hidden_size, post_normed);
-      gate.assign(gate_up.begin(), gate_up.begin() + config.intermediate_size);
-      up.assign(gate_up.begin() + config.intermediate_size, gate_up.end());
+      activated = swiglu_from_gate_up(gate_up);
     } else {
-      gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
-      up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
+      const auto gate = matvec(weights.gate_proj, config.intermediate_size, config.hidden_size, post_normed);
+      const auto up = matvec(weights.up_proj, config.intermediate_size, config.hidden_size, post_normed);
+      activated = swiglu(gate, up);
     }
-    const auto activated = swiglu(gate, up);
     mlp = matvec(weights.down_proj, config.hidden_size, config.intermediate_size, activated);
   }
 
