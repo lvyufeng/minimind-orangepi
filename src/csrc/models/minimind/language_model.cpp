@@ -190,7 +190,7 @@ std::vector<int32_t> LanguageModel::generate(const std::vector<int32_t>& prompt_
   generated.reserve(static_cast<std::size_t>(max_new_tokens));
   for (int64_t i = 0; i < max_new_tokens; ++i) {
     generated.push_back(next);
-    if (next == config_.eos_token_id) {
+    if (next == config_.eos_token_id || i + 1 == max_new_tokens) {
       break;
     }
     next = forward_next_token(next, state);

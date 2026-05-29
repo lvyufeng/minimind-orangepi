@@ -70,7 +70,9 @@ std::vector<int32_t> decode_fixed_steps(const minimind::model::LanguageModel& mo
   generated.reserve(static_cast<std::size_t>(decode_tokens));
   for (int64_t i = 0; i < decode_tokens; ++i) {
     generated.push_back(next);
-    next = model.forward_next_token(next, state);
+    if (i + 1 < decode_tokens) {
+      next = model.forward_next_token(next, state);
+    }
   }
   return generated;
 }
@@ -90,7 +92,9 @@ double timed_decode_fixed_steps(const minimind::model::LanguageModel& model,
   const auto start = std::chrono::steady_clock::now();
   for (int64_t i = 0; i < decode_tokens; ++i) {
     generated.push_back(next);
-    next = model.forward_next_token(next, state);
+    if (i + 1 < decode_tokens) {
+      next = model.forward_next_token(next, state);
+    }
   }
   const auto end = std::chrono::steady_clock::now();
   return std::chrono::duration<double>(end - start).count();
