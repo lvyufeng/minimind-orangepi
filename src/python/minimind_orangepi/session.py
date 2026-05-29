@@ -24,6 +24,18 @@ def chat_prompt(prompt: str, open_thinking: bool = False) -> str:
     return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
 
 
+def validate_runtime_model_dir(model: Path | None) -> None:
+    if model is None:
+        return
+    if not model.exists():
+        raise FileNotFoundError(f"model directory does not exist: {model}")
+    if not model.is_dir():
+        raise NotADirectoryError(f"model path is not a directory: {model}")
+    missing = [name for name in ("minimind_runtime_config.txt", "weights.bin") if not (model / name).exists()]
+    if missing:
+        raise ValueError(f"invalid MiniMind text runtime model directory {model}; missing: {', '.join(missing)}")
+
+
 def parse_token_line(output: str, label: str) -> list[int]:
     for line in output.splitlines():
         if line.startswith(label + ":"):

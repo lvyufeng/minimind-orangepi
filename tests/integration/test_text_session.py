@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from minimind_orangepi.session import GenerationResult, chat_prompt, parse_token_line
+from pathlib import Path
+
+import pytest
+
+from minimind_orangepi.session import GenerationResult, chat_prompt, parse_token_line, validate_runtime_model_dir
 
 
 def test_parse_token_line() -> None:
@@ -22,3 +26,38 @@ def test_generation_result_formats_decoded_text() -> None:
 def test_chat_prompt_matches_minimind_markers() -> None:
     assert chat_prompt("你好") == "<|im_start|>user\n你好<|im_end|>\n<|im_start|>assistant\n"
     assert chat_prompt("你好", open_thinking=True).endswith("assistant\n<think>\n")
+
+
+def test_validate_runtime_model_dir_allows_toy_fallback() -> None:
+    validate_runtime_model_dir(None)
+
+
+def test_validate_runtime_model_dir_rejects_missing_dir(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        validate_runtime_model_dir(tmp_path / "missing")
+
+
+def test_validate_runtime_model_dir_rejects_file(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.write_text("not a directory")
+    with pytest.raises(NotADirectoryError):
+        validate_runtime_model_dir(model)
+
+
+def test_validate_runtime_model_dir_rejects_missing_runtime_files(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    with pytest.raises(ValueError, match="minimind_runtime_config.txt"):
+        validate_runtime_model_dir(model)
+
+    (model / "minimind_runtime_config.txt").write_text("hidden_size=4\n")
+    with pytest.raises(ValueError, match="weights.bin"):
+        validate_runtime_model_dir(model)
+
+
+def test_validate_runtime_model_dir_accepts_runtime_dir(tmp_path: Path) -> None:
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "minimind_runtime_config.txt").write_text("hidden_size=4\n")
+    (model / "weights.bin").write_bytes(b"MMRTW001")
+    validate_runtime_model_dir(model)
