@@ -145,6 +145,10 @@ add_executable(bench_decode bench/bench_decode.cpp)
 target_link_libraries(bench_decode PRIVATE minimind_orangepi_runtime)
 target_compile_options(bench_decode PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(check_prefill_consistency bench/check_prefill_consistency.cpp)
+target_link_libraries(check_prefill_consistency PRIVATE minimind_orangepi_runtime)
+target_compile_options(check_prefill_consistency PRIVATE -Wall -Wextra -Wpedantic)
+
 function(minimind_add_unit_test target source)
   add_executable(${target} ${source})
   target_link_libraries(${target} PRIVATE minimind_orangepi_runtime)

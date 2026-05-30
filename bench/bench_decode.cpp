@@ -62,13 +62,11 @@ std::vector<int32_t> decode_fixed_steps(const minimind::model::LanguageModel& mo
                                         const std::vector<int32_t>& input_tokens,
                                         int64_t decode_tokens) {
   auto state = model.make_state();
-  int32_t next = 0;
-  for (int32_t token : input_tokens) {
-    next = model.forward_next_token(token, state);
-  }
+  const int32_t first = model.prefill_next_token(input_tokens, state);
 
   std::vector<int32_t> generated;
   generated.reserve(static_cast<std::size_t>(decode_tokens));
+  int32_t next = first;
   for (int64_t i = 0; i < decode_tokens; ++i) {
     generated.push_back(next);
     if (i + 1 < decode_tokens) {
@@ -90,12 +88,9 @@ TimingResult timed_decode_fixed_steps(const minimind::model::LanguageModel& mode
                                       int64_t decode_tokens,
                                       std::vector<int32_t>& generated) {
   auto state = model.make_state();
-  int32_t next = 0;
 
   const auto prefill_start = std::chrono::steady_clock::now();
-  for (int32_t token : input_tokens) {
-    next = model.forward_next_token(token, state);
-  }
+  int32_t next = model.prefill_next_token(input_tokens, state);
   const auto prefill_end = std::chrono::steady_clock::now();
 
   generated.clear();

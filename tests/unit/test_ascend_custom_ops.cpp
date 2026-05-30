@@ -135,5 +135,115 @@ int main() {
     }
   }
 
+  {
+    const int64_t prefill_tokens = 16;
+    const int64_t prefill_q_heads = 4;
+    const int64_t prefill_kv_heads = 2;
+    const int64_t prefill_head_dim = 16;
+    std::vector<float> prefill_query(static_cast<std::size_t>(prefill_tokens * prefill_q_heads * prefill_head_dim));
+    std::vector<float> prefill_keys(static_cast<std::size_t>(prefill_tokens * prefill_kv_heads * prefill_head_dim));
+    std::vector<float> prefill_values(prefill_keys.size());
+    for (std::size_t i = 0; i < prefill_query.size(); ++i) {
+      prefill_query[i] = static_cast<float>(static_cast<int>(i % 17) - 8) * 0.015625F;
+    }
+    for (std::size_t i = 0; i < prefill_keys.size(); ++i) {
+      prefill_keys[i] = static_cast<float>(static_cast<int>(i % 19) - 9) * 0.0125F;
+      prefill_values[i] = static_cast<float>(static_cast<int>(i % 13) - 6) * 0.01875F;
+    }
+
+    std::shared_ptr<minimind::model::CustomAttentionCache> cache;
+    const auto prefill_attended = minimind::model::custom_prefill_attention(
+        prefill_query, prefill_keys, prefill_values, cache, prefill_tokens, prefill_q_heads, prefill_kv_heads,
+        prefill_head_dim);
+    CHECK(prefill_attended.size() == prefill_query.size());
+    const int64_t prefill_kv_repeat = prefill_q_heads / prefill_kv_heads;
+    for (int64_t pos = 0; pos < prefill_tokens; ++pos) {
+      const int64_t valid_tokens = pos + 1;
+      for (int64_t q_head = 0; q_head < prefill_q_heads; ++q_head) {
+        const int64_t kv_head = q_head / prefill_kv_repeat;
+        std::vector<float> scores(static_cast<std::size_t>(valid_tokens));
+        float max_score = -INFINITY;
+        for (int64_t token = 0; token < valid_tokens; ++token) {
+          float dot = 0.0F;
+          for (int64_t dim = 0; dim < prefill_head_dim; ++dim) {
+            dot += prefill_query[static_cast<std::size_t>((pos * prefill_q_heads + q_head) * prefill_head_dim + dim)] *
+                   prefill_keys[static_cast<std::size_t>((token * prefill_kv_heads + kv_head) * prefill_head_dim + dim)];
+          }
+          const float score = dot / std::sqrt(static_cast<float>(prefill_head_dim));
+          scores[static_cast<std::size_t>(token)] = score;
+          max_score = std::max(max_score, score);
+        }
+        float denom = 0.0F;
+        for (float& score : scores) {
+          score = std::exp(score - max_score);
+          denom += score;
+        }
+        for (int64_t dim = 0; dim < prefill_head_dim; ++dim) {
+          float expected = 0.0F;
+          for (int64_t token = 0; token < valid_tokens; ++token) {
+            const float weight_value = scores[static_cast<std::size_t>(token)] / denom;
+            expected += weight_value *
+                        prefill_values[static_cast<std::size_t>((token * prefill_kv_heads + kv_head) * prefill_head_dim + dim)];
+          }
+          const std::size_t index = static_cast<std::size_t>((pos * prefill_q_heads + q_head) * prefill_head_dim + dim);
+          CHECK(std::fabs(prefill_attended[index] - expected) < 5e-2F);
+        }
+      }
+    }
+  }
+
+#if defined(MINIMIND_USE_CUSTOM_ASCEND_OPS)
+  const int64_t rows = 3;
+  const int64_t cols = 128;
+  std::vector<float> rows_input(static_cast<std::size_t>(rows * cols));
+  std::vector<float> rows_weight(static_cast<std::size_t>(cols));
+  for (std::size_t i = 0; i < rows_input.size(); ++i) {
+    rows_input[i] = static_cast<float>(static_cast<int>(i % 23) - 11) * 0.0625F;
+  }
+  for (std::size_t i = 0; i < rows_weight.size(); ++i) {
+    rows_weight[i] = 0.75F + static_cast<float>(i % 5) * 0.03125F;
+  }
+  const auto rows_normalized = minimind::model::custom_rms_norm_rows(rows_input, rows_weight, rows, cols, eps);
+  CHECK(rows_normalized.size() == rows_input.size());
+  for (int64_t row = 0; row < rows; ++row) {
+    float row_sum = 0.0F;
+    for (int64_t col = 0; col < cols; ++col) {
+      const float value = rows_input[static_cast<std::size_t>(row * cols + col)];
+      row_sum += value * value;
+    }
+    const float row_scale = 1.0F / std::sqrt(row_sum / static_cast<float>(cols) + eps);
+    for (int64_t col = 0; col < cols; ++col) {
+      const std::size_t index = static_cast<std::size_t>(row * cols + col);
+      const float expected = rows_input[index] * row_scale * rows_weight[static_cast<std::size_t>(col)];
+      CHECK(std::fabs(rows_normalized[index] - expected) < 5e-2F);
+    }
+  }
+
+  const int64_t swiglu_rows = 3;
+  const int64_t swiglu_cols = 64;
+  std::vector<float> swiglu_gate_up(static_cast<std::size_t>(swiglu_rows * swiglu_cols * 2));
+  for (int64_t row = 0; row < swiglu_rows; ++row) {
+    for (int64_t col = 0; col < swiglu_cols; ++col) {
+      const std::size_t gate_index = static_cast<std::size_t>(row * swiglu_cols * 2 + col);
+      const std::size_t up_index = static_cast<std::size_t>(row * swiglu_cols * 2 + swiglu_cols + col);
+      swiglu_gate_up[gate_index] = static_cast<float>(static_cast<int>((row * swiglu_cols + col) % 13) - 6) * 0.125F;
+      swiglu_gate_up[up_index] = static_cast<float>(static_cast<int>((row * swiglu_cols + col) % 11) - 5) * 0.0625F;
+    }
+  }
+  const auto swiglu_rows_out = minimind::model::custom_swiglu_rows(swiglu_gate_up, swiglu_rows, swiglu_cols);
+  CHECK(swiglu_rows_out.size() == static_cast<std::size_t>(swiglu_rows * swiglu_cols));
+  for (int64_t row = 0; row < swiglu_rows; ++row) {
+    for (int64_t col = 0; col < swiglu_cols; ++col) {
+      const std::size_t gate_index = static_cast<std::size_t>(row * swiglu_cols * 2 + col);
+      const std::size_t up_index = static_cast<std::size_t>(row * swiglu_cols * 2 + swiglu_cols + col);
+      const std::size_t out_index = static_cast<std::size_t>(row * swiglu_cols + col);
+      const float gate = swiglu_gate_up[gate_index];
+      const float silu = gate / (1.0F + std::exp(-gate));
+      const float expected = silu * swiglu_gate_up[up_index];
+      CHECK(std::fabs(swiglu_rows_out[out_index] - expected) < 5e-2F);
+    }
+  }
+#endif
+
   return 0;
 }
