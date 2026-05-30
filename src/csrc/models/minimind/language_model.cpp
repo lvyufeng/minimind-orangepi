@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -116,6 +117,11 @@ void initialize_fused_layer_weights(const MiniMindConfig& config, DenseLayerWeig
       }
     }
   }
+}
+
+bool enable_device_layers() {
+  const char* value = std::getenv("MINIMIND_ENABLE_DEVICE_LAYERS");
+  return value != nullptr && value[0] != '\0' && std::string(value) != "0";
 }
 
 #if defined(MINIMIND_USE_ASCEND)
@@ -309,8 +315,8 @@ std::vector<float> LanguageModel::forward_token(int32_t token, DecoderState& sta
 
 int32_t LanguageModel::forward_next_token(int32_t token, DecoderState& state) const {
 #if defined(MINIMIND_USE_ASCEND)
-  if (cube_matvec_available() && custom_ops_available() && config_.hidden_size >= 128 && config_.vocab_size >= 128 &&
-      config_.head_dim <= 128 && !config_.use_moe) {
+  if (enable_device_layers() && cube_matvec_available() && custom_ops_available() && config_.hidden_size >= 128 &&
+      config_.vocab_size >= 128 && config_.head_dim <= 128 && !config_.use_moe) {
     return forward_next_token_device(config_, ascend_weights(), token, state);
   }
 #endif
@@ -340,7 +346,7 @@ int32_t LanguageModel::prefill_next_token(const std::vector<int32_t>& prompt_tok
     throw std::runtime_error("prefill requires Ascend Cube and custom ops");
   }
 #if defined(MINIMIND_USE_ASCEND)
-  if (config_.hidden_size >= 128 && config_.vocab_size >= 128 && config_.head_dim <= 128 &&
+  if (enable_device_layers() && config_.hidden_size >= 128 && config_.vocab_size >= 128 && config_.head_dim <= 128 &&
       static_cast<int64_t>(prompt_tokens.size()) <= 2048 && !config_.use_moe) {
     return prefill_next_token_device(config_, ascend_weights(), prompt_tokens, state);
   }
